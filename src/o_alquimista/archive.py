@@ -38,6 +38,18 @@ COPY_CHUNK_BYTES = 1024 * 1024
 EOCD_SIGNATURE = b"PK\x05\x06"
 EOCD = struct.Struct("<4s4H2LH")
 MAX_ZIP_COMMENT_BYTES = 65_535
+WINDOWS_RESERVED_COMPONENTS = frozenset(
+    {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "CONIN$",
+        "CONOUT$",
+        *(f"COM{index}" for index in range(1, 10)),
+        *(f"LPT{index}" for index in range(1, 10)),
+    }
+)
 
 
 def _preflight_central_directory(path: Path) -> None:
@@ -101,6 +113,12 @@ def validate_archive(archive_path: Path) -> Path:
     return path
 
 
+def _is_windows_reserved_component(component: str) -> bool:
+    normalized = component.rstrip(" .")
+    base_name = normalized.split(".", 1)[0].rstrip(" .")
+    return base_name.upper() in WINDOWS_RESERVED_COMPONENTS
+
+
 def _safe_relative_path(info: zipfile.ZipInfo) -> Path:
     raw_name = info.filename.replace("\\", "/")
     if "\x00" in raw_name:
@@ -115,6 +133,18 @@ def _safe_relative_path(info: zipfile.ZipInfo) -> Path:
         raise UnsafeArchiveError(f"Entrada absoluta bloqueada: {info.filename!r}")
     if any(part in {"", ".", ".."} for part in member.parts):
         raise UnsafeArchiveError(f"Path traversal bloqueado: {info.filename!r}")
+    reserved = next(
+        (
+            part
+            for part in member.parts
+            if _is_windows_reserved_component(part)
+        ),
+        None,
+    )
+    if reserved is not None:
+        raise UnsafeArchiveError(
+            f"Componente reservado do Windows bloqueado: {reserved!r}"
+        )
     directory_depth = len(member.parts) if info.is_dir() else len(member.parts) - 1
     if directory_depth > MAX_DIRECTORY_DEPTH:
         raise ArchiveLimitError(
