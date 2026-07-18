@@ -12,6 +12,7 @@ from .evidence import (
     deterministic_id,
     inferred_evidence,
     observed_evidence,
+    snapshot_count_evidence,
     snapshot_evidence,
     unavailable_evidence,
 )
@@ -628,6 +629,7 @@ def _recommendation(
     priority: RecommendationPriority,
     confidence: ConfidenceLevel,
     evidence: tuple[Evidence, ...],
+    confidence_justification: str,
     missing: tuple[str, ...] = (),
     limitations: tuple[str, ...] = (),
 ) -> StrategicRecommendation:
@@ -647,9 +649,7 @@ def _recommendation(
         contradictory_evidence=(),
         missing_information=missing,
         rule_id=rule_id,
-        confidence_justification=(
-            "Regra determinística aplicada somente a campos observados."
-        ),
+        confidence_justification=confidence_justification,
         limitations=limitations,
     )
 
@@ -663,15 +663,17 @@ def _low_liquidity_rule(
     balance = _decimal(finance.get("liquid_cash_estimate"))
     if balance is None or balance >= Decimal("100"):
         return None
-    evidence = derived_evidence(
-        sources=("Money.json", "Players/*/Inventory.json"),
-        field_name="liquid_cash_estimate",
-        value=_decimal_text(balance),
-        calculation="online_balance + dinheiro físico observado",
-        explanation="Liquidez estimada abaixo do limiar conservador de 100.",
-        related_entity="finance",
-        confidence="medium",
+    evidence = next(
+        (
+            item
+            for item in snapshot_evidence(context.snapshot)
+            if item.field_name == "liquid_cash_estimate"
+            and item.category == "derived"
+        ),
+        None,
     )
+    if evidence is None:
+        return None
     return _recommendation(
         context,
         rule_id="liquidity.minimum-buffer.v1",
@@ -684,6 +686,10 @@ def _low_liquidity_rule(
         priority="high",
         confidence="medium",
         evidence=(evidence,),
+        confidence_justification=(
+            "A regra compara uma estimativa derivada de liquidez com o limiar "
+            "declarado; despesas futuras continuam indisponíveis."
+        ),
         missing=("despesas", "compromissos futuros"),
         limitations=("O limiar é uma heurística local, não uma regra do jogo.",),
     )
@@ -724,6 +730,10 @@ def _operational_dependency_rule(
         priority="medium",
         confidence="medium",
         evidence=(property_evidence, employee_evidence),
+        confidence_justification=(
+            "A regra combina a contagem observada de propriedades possuídas com "
+            "a contagem observada de funcionários."
+        ),
         missing=("funções dos objetos", "horas trabalhadas"),
     )
 
@@ -733,10 +743,9 @@ def _insufficient_history_rule(
 ) -> StrategicRecommendation | None:
     if context.snapshot_count >= 2:
         return None
-    evidence = unavailable_evidence(
-        field_name="previous_snapshot",
-        explanation="A campanha possui menos de dois snapshots.",
-        related_entity="timeline",
+    evidence = snapshot_count_evidence(
+        campaign_id=context.campaign_id,
+        snapshot_count=context.snapshot_count,
     )
     return _recommendation(
         context,
@@ -750,6 +759,10 @@ def _insufficient_history_rule(
         priority="informational",
         confidence="high",
         evidence=(evidence,),
+        confidence_justification=(
+            "A recomendação decorre exclusivamente da contagem persistida de "
+            "snapshots da campanha."
+        ),
         missing=("snapshot anterior",),
     )
 
@@ -802,6 +815,10 @@ def build_campaign_analysis(
     latest = snapshots[-1]
     latest_id = timeline[-1]["snapshot_id"]
     evidence = snapshot_evidence(latest)
+    count_evidence = snapshot_count_evidence(
+        campaign_id=campaign_id,
+        snapshot_count=len(timeline),
+    )
     recommendations = generate_recommendations(
         RecommendationContext(
             campaign_id=campaign_id,
@@ -811,26 +828,32 @@ def build_campaign_analysis(
         )
     )
     facts = tuple(item for item in evidence if item.category == "observed")
-    derived = tuple(item for item in evidence if item.category == "derived")
+    derived = tuple(
+        sorted(
+            (
+                *(item for item in evidence if item.category == "derived"),
+                count_evidence,
+            ),
+            key=lambda item: item.evidence_id,
+        )
+    )
     unavailable = tuple(item for item in evidence if item.category == "unavailable")
     inferences: tuple[Evidence, ...] = ()
     if len(timeline) >= 2:
-        base = derived[0] if derived else facts[0] if facts else None
-        if base is not None:
-            inferences = (
-                inferred_evidence(
-                    evidence_ids=(base.evidence_id,),
-                    field_name="campaign_has_history",
-                    value=True,
-                    calculation="contagem de snapshots >= 2",
-                    explanation=(
-                        "A campanha possui histórico suficiente para comparações; "
-                        "isso não implica tendência econômica."
-                    ),
-                    confidence="high",
-                    related_entity="timeline",
+        inferences = (
+            inferred_evidence(
+                evidence_ids=(count_evidence.evidence_id,),
+                field_name="campaign_has_history",
+                value=True,
+                calculation="snapshot_count >= 2",
+                explanation=(
+                    "A contagem da timeline demonstra histórico suficiente para "
+                    "comparações; isso não implica tendência econômica."
                 ),
-            )
+                confidence="high",
+                related_entity=campaign_id,
+            ),
+        )
     return CampaignAnalysis(
         campaign_id=campaign_id,
         facts=facts,

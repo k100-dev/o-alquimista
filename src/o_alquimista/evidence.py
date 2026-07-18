@@ -61,6 +61,7 @@ def derived_evidence(
     explanation: str,
     related_entity: str | None = None,
     confidence: ConfidenceLevel = "high",
+    supporting_evidence_ids: tuple[str, ...] = (),
 ) -> Evidence:
     return Evidence(
         evidence_id=deterministic_id(
@@ -70,6 +71,7 @@ def derived_evidence(
             field_name,
             value,
             calculation,
+            supporting_evidence_ids,
         ),
         category="derived",
         source_file=";".join(sources),
@@ -81,6 +83,7 @@ def derived_evidence(
         explanation=explanation,
         confidence=confidence,
         related_entity=related_entity,
+        supporting_evidence_ids=supporting_evidence_ids,
     )
 
 
@@ -124,6 +127,7 @@ def unavailable_evidence(
     field_name: str,
     explanation: str,
     related_entity: str | None = None,
+    supporting_evidence_ids: tuple[str, ...] = (),
 ) -> Evidence:
     return Evidence(
         evidence_id=deterministic_id(
@@ -131,6 +135,7 @@ def unavailable_evidence(
             "unavailable",
             field_name,
             related_entity,
+            supporting_evidence_ids,
         ),
         category="unavailable",
         source_file=None,
@@ -142,7 +147,56 @@ def unavailable_evidence(
         explanation=explanation,
         confidence="unavailable",
         related_entity=related_entity,
+        supporting_evidence_ids=supporting_evidence_ids,
         missing_information=(field_name,),
+    )
+
+
+def snapshot_count_evidence(
+    *,
+    campaign_id: str,
+    snapshot_count: int,
+) -> Evidence:
+    """Registra a contagem persistida que sustenta conclusões sobre histórico."""
+    return Evidence(
+        evidence_id=deterministic_id(
+            "evidence",
+            "derived",
+            campaign_id,
+            "snapshot_count",
+            snapshot_count,
+        ),
+        category="derived",
+        source_file="<database>",
+        source_path="timeline_entries.campaign_id",
+        field_name="snapshot_count",
+        raw_value=None,
+        normalized_value=snapshot_count,
+        calculation="contagem de snapshots ordenados da campanha",
+        explanation=(
+            "Quantidade de snapshots pertencentes à timeline desta campanha."
+        ),
+        confidence="high",
+        related_entity=campaign_id,
+    )
+
+
+def _origin_files(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, dict):
+        return ()
+    origins = value.get("origins")
+    if not isinstance(origins, (list, tuple)):
+        return ()
+    return tuple(
+        sorted(
+            {
+                str(origin["file"])
+                for origin in origins
+                if isinstance(origin, dict)
+                and isinstance(origin.get("file"), str)
+                and origin["file"]
+            }
+        )
     )
 
 
@@ -151,32 +205,67 @@ def snapshot_evidence(snapshot: dict[str, Any]) -> tuple[Evidence, ...]:
     evidence: list[Evidence] = []
     finance = snapshot.get("finance")
     if isinstance(finance, dict):
+        by_field: dict[str, Evidence] = {}
         for field_name, source_field in (
             ("online_balance", "OnlineBalance"),
             ("networth", "Networth"),
             ("lifetime_earnings", "LifetimeEarnings"),
         ):
             if field_name in finance and finance[field_name] is not None:
-                evidence.append(
-                    observed_evidence(
-                        source_file="Money.json",
-                        source_path=source_field,
-                        field_name=field_name,
-                        value=finance[field_name],
-                        explanation=f"{field_name} observado diretamente no save.",
-                        related_entity="finance",
-                    )
+                item = observed_evidence(
+                    source_file="Money.json",
+                    source_path=source_field,
+                    field_name=field_name,
+                    value=finance[field_name],
+                    explanation=f"{field_name} observado diretamente no save.",
+                    related_entity="finance",
                 )
+                evidence.append(item)
+                by_field[field_name] = item
+        inventory_sources = _origin_files(snapshot.get("inventory"))
+        if finance.get("loose_cash") is not None:
+            loose_sources = inventory_sources or ("<normalized>/inventory",)
+            loose_cash = derived_evidence(
+                sources=loose_sources,
+                field_name="loose_cash",
+                value=finance["loose_cash"],
+                calculation="soma de CashBalance dos itens de inventário observados",
+                explanation=(
+                    "Dinheiro físico agregado somente das fontes de inventário "
+                    "registradas no snapshot."
+                ),
+                related_entity="finance",
+                confidence="medium",
+            )
+            evidence.append(loose_cash)
+            by_field["loose_cash"] = loose_cash
         if finance.get("liquid_cash_estimate") is not None:
+            supporting_ids = tuple(
+                item.evidence_id
+                for field_name in ("online_balance", "loose_cash")
+                if (item := by_field.get(field_name)) is not None
+            )
+            liquidity_sources = tuple(
+                sorted(
+                    {
+                        "Money.json",
+                        *(inventory_sources or ("<normalized>/inventory",)),
+                    }
+                )
+            )
             evidence.append(
                 derived_evidence(
-                    sources=("Money.json", "Players/*/Inventory.json"),
+                    sources=liquidity_sources,
                     field_name="liquid_cash_estimate",
                     value=finance["liquid_cash_estimate"],
                     calculation="online_balance + dinheiro físico observado",
-                    explanation="Estimativa derivada de dois valores observados.",
+                    explanation=(
+                        "Estimativa derivada do saldo online e do dinheiro físico, "
+                        "com as fontes reais do inventário preservadas."
+                    ),
                     related_entity="finance",
                     confidence="medium",
+                    supporting_evidence_ids=supporting_ids,
                 )
             )
 
@@ -211,7 +300,30 @@ def snapshot_evidence(snapshot: dict[str, Any]) -> tuple[Evidence, ...]:
             if not isinstance(value, dict):
                 continue
             state = value.get("state")
-            if state in {None, "observed"}:
+            if state is None:
+                continue
+            source_files = value.get("source_files")
+            sources = tuple(
+                sorted(
+                    str(source)
+                    for source in source_files
+                    if isinstance(source, str)
+                )
+            ) if isinstance(source_files, (list, tuple)) else ()
+            if state == "observed":
+                evidence.append(
+                    derived_evidence(
+                        sources=sources or (f"<normalized>/{section}",),
+                        field_name=f"{section}_availability",
+                        value="observed",
+                        calculation="validação de presença e estrutura da seção",
+                        explanation=(
+                            f"A seção {section} foi validada como disponível; "
+                            "coleções vazias continuam observadas."
+                        ),
+                        related_entity=str(section),
+                    )
+                )
                 continue
             evidence.append(
                 unavailable_evidence(
