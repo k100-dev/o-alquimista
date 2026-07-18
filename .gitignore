@@ -1,0 +1,25 @@
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.dist-info/
+
+# Ambiente virtual
+.venv/
+
+# Dados locais e arquivos gerados
+data/
+output/
+saves/
+
+# Bancos e exports
+*.db
+*.sqlite
+*.sqlite3
+*.zip
+
+# Testes
+.pytest_cache/
+.coverage
+htmlcov/
