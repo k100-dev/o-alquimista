@@ -62,6 +62,9 @@ def derived_evidence(
     related_entity: str | None = None,
     confidence: ConfidenceLevel = "high",
     supporting_evidence_ids: tuple[str, ...] = (),
+    limitations: tuple[str, ...] = (
+        "Cálculo limitado às fontes e aos campos declarados.",
+    ),
 ) -> Evidence:
     return Evidence(
         evidence_id=deterministic_id(
@@ -84,6 +87,7 @@ def derived_evidence(
         confidence=confidence,
         related_entity=related_entity,
         supporting_evidence_ids=supporting_evidence_ids,
+        limitations=limitations,
     )
 
 
@@ -178,6 +182,9 @@ def snapshot_count_evidence(
         ),
         confidence="high",
         related_entity=campaign_id,
+        limitations=(
+            "A contagem representa somente snapshots persistidos nesta campanha.",
+        ),
     )
 
 
@@ -236,6 +243,9 @@ def snapshot_evidence(snapshot: dict[str, Any]) -> tuple[Evidence, ...]:
                 ),
                 related_entity="finance",
                 confidence="medium",
+                limitations=(
+                    "A soma cobre somente itens e fontes de inventário normalizados.",
+                ),
             )
             evidence.append(loose_cash)
             by_field["loose_cash"] = loose_cash
@@ -266,6 +276,9 @@ def snapshot_evidence(snapshot: dict[str, Any]) -> tuple[Evidence, ...]:
                     related_entity="finance",
                     confidence="medium",
                     supporting_evidence_ids=supporting_ids,
+                    limitations=(
+                        "Despesas e compromissos futuros não participam da estimativa.",
+                    ),
                 )
             )
 

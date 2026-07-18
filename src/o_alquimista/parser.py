@@ -956,16 +956,10 @@ def snapshot_and_fingerprint_from_zip(
                 archive_root=archive_root,
                 archive_fingerprint=fingerprint,
             )
-    except Exception as processing_error:
+    finally:
         verified_fingerprint = fingerprint_archive(archive)
         if verified_fingerprint != fingerprint:
             raise InvalidArchiveError(
                 "O ZIP foi alterado por outro processo durante a leitura."
-            ) from processing_error
-        raise
-    verified_fingerprint = fingerprint_archive(archive)
-    if verified_fingerprint != fingerprint:
-        raise InvalidArchiveError(
-            "O ZIP foi alterado por outro processo durante a leitura."
-        )
+            )
     return snapshot, fingerprint

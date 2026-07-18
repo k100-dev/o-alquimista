@@ -35,7 +35,10 @@ from .memory_models import (
     StrategicRecommendation,
 )
 from .models import Milestone, NormalizedSnapshot, Recommendation
-from .provenance import validate_snapshot_provenance
+from .provenance import (
+    validate_provenance_payload,
+    validate_snapshot_provenance,
+)
 
 DATABASE_VERSION = 3
 
@@ -265,7 +268,8 @@ class AlquimistaDatabase:
             if current_version > DATABASE_VERSION:
                 raise UnsupportedDatabaseVersionError(
                     "O banco usa uma versão de schema mais nova que esta "
-                    f"aplicação (banco={current_version}, suportado={DATABASE_VERSION})."
+                    f"aplicação (banco={current_version}, suportado={DATABASE_VERSION}); "
+                    "use uma versão compatível do O Alquimista."
                 )
             connection.executescript(
                 f"BEGIN IMMEDIATE;\n{BASE_SCHEMA}\n{MEMORY_SCHEMA}"
@@ -483,6 +487,9 @@ class AlquimistaDatabase:
         campaign_id: str,
         evidence: Iterable[Evidence],
     ) -> None:
+        evidence_items = tuple(evidence)
+        for item in evidence_items:
+            validate_provenance_payload(item.to_dict())
         connection.executemany(
             """
             INSERT OR IGNORE INTO evidence
@@ -497,7 +504,7 @@ class AlquimistaDatabase:
                     item.category,
                     AlquimistaDatabase._json(item.to_dict()),
                 )
-                for item in evidence
+                for item in evidence_items
             ],
         )
 
@@ -906,6 +913,7 @@ class AlquimistaDatabase:
         """Persiste toda a importação atomicamente e deduplica por SHA-256."""
         snapshot_data = snapshot.to_dict()
         validate_snapshot_provenance(snapshot_data)
+        validate_provenance_payload(campaign_identity.to_dict())
         self.initialize()
         imported_at = self._now()
         import_id, snapshot_id = self._ids(fingerprint)

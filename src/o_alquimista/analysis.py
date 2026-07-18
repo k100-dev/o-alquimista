@@ -573,7 +573,7 @@ def detect_milestones(
             percentage = (delta / previous_networth) * Decimal("100")
             if delta >= Decimal("1000") and percentage >= Decimal("25"):
                 evidence = derived_evidence(
-                    sources=("Money.json:Networth",),
+                    sources=("Money.json",),
                     field_name="networth_growth",
                     value={
                         "absolute": _decimal_text(delta),
