@@ -94,6 +94,35 @@ def _set_zip_member_bits(
     raise AssertionError("Entrada não encontrada no diretório central sintético.")
 
 
+def _declare_truncated_member(archive: Path, member_name: str) -> None:
+    """Declara mais bytes que os disponíveis para simular membro truncado."""
+    with zipfile.ZipFile(archive) as source:
+        info = source.getinfo(member_name)
+    data = bytearray(archive.read_bytes())
+    for offset in (info.header_offset + 18, info.header_offset + 22):
+        declared = struct.unpack_from("<L", data, offset)[0]
+        struct.pack_into("<L", data, offset, declared + 32)
+
+    central_offset = data.find(b"PK\x01\x02")
+    while central_offset >= 0:
+        name_length, extra_length, comment_length = struct.unpack_from(
+            "<HHH", data, central_offset + 28
+        )
+        name_start = central_offset + 46
+        name = bytes(data[name_start : name_start + name_length]).decode("utf-8")
+        if name == member_name:
+            for offset in (central_offset + 20, central_offset + 24):
+                declared = struct.unpack_from("<L", data, offset)[0]
+                struct.pack_into("<L", data, offset, declared + 32)
+            archive.write_bytes(data)
+            return
+        central_offset = data.find(
+            b"PK\x01\x02",
+            name_start + name_length + extra_length + comment_length,
+        )
+    raise AssertionError("Entrada truncada não encontrada no diretório central.")
+
+
 class TimelineDeterminismTests(unittest.TestCase):
     def test_inverse_import_order_produces_identical_analysis(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -160,11 +189,33 @@ class TimelineDeterminismTests(unittest.TestCase):
             first_analysis = first_db.campaign_analysis(campaign_id)
             second_analysis = second_db.campaign_analysis(campaign_id)
             self.assertEqual(first_analysis.to_dict(), second_analysis.to_dict())
+            self.assertEqual(
+                {
+                    item.evidence_id
+                    for item in (
+                        *first_analysis.facts,
+                        *first_analysis.derived,
+                        *first_analysis.inferences,
+                        *first_analysis.unavailable,
+                    )
+                },
+                {
+                    item.evidence_id
+                    for item in (
+                        *second_analysis.facts,
+                        *second_analysis.derived,
+                        *second_analysis.inferences,
+                        *second_analysis.unavailable,
+                    )
+                },
+            )
             first_report = build_analysis_markdown(first_analysis)
             second_report = build_analysis_markdown(second_analysis)
             self.assertEqual(first_report, second_report)
             self.assertNotIn("DeterministicMarker", first_report)
             self.assertNotIn("round3-timeline", first_report)
+            self.assertNotIn("unknown_fields", first_report)
+            self.assertNotIn("raw_value", first_report)
             self.assertEqual(
                 [item.to_dict() for item in first_db.detected_milestones(campaign_id)],
                 [item.to_dict() for item in second_db.detected_milestones(campaign_id)],
@@ -243,6 +294,37 @@ class EvidenceLineageTests(unittest.TestCase):
             )
             self.assertNotIn("WorldStorageEntities.json", evidence.source_file or "")
 
+    def test_liquidity_preserves_all_inventory_origins(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "multiple-origins.zip"
+            files = sample_files()
+            files["WorldStorageEntities.json"] = {
+                "Entities": [
+                    {
+                        "Contents": {
+                            "Items": [
+                                {
+                                    "ID": "cash",
+                                    "Quantity": 1,
+                                    "CashBalance": 5,
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+            create_save_zip(archive, files=files)
+            evidence = self._liquidity_evidence(snapshot_from_zip(archive).to_dict())
+
+            self.assertIn(
+                "Players/local-player/Inventory.json",
+                evidence.source_file or "",
+            )
+            self.assertIn("WorldStorageEntities.json", evidence.source_file or "")
+            self.assertTrue(evidence.supporting_evidence_ids)
+            self.assertTrue(evidence.calculation)
+            self.assertTrue(evidence.limitations)
+
     def test_history_and_recommendations_reference_semantic_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -299,6 +381,14 @@ class EvidenceLineageTests(unittest.TestCase):
             for evidence in all_evidence.values():
                 for supporting_id in evidence.supporting_evidence_ids:
                     self.assertIn(supporting_id, all_evidence)
+                if evidence.category == "derived":
+                    self.assertTrue(evidence.calculation)
+                    self.assertTrue(evidence.limitations)
+                if evidence.category == "inferred":
+                    self.assertTrue(evidence.supporting_evidence_ids)
+                    self.assertTrue(evidence.calculation)
+                    self.assertNotEqual(evidence.confidence, "unavailable")
+                    self.assertTrue(evidence.limitations)
             for recommendation in analysis.recommendations:
                 self.assertTrue(recommendation.supporting_evidence)
                 if recommendation.rule_id == "liquidity.minimum-buffer.v1":
@@ -310,6 +400,24 @@ class EvidenceLineageTests(unittest.TestCase):
                     "somente a campos observados",
                     recommendation.confidence_justification,
                 )
+
+            latest_snapshot_id = database.campaign_history(first.campaign_id)[-1][
+                "snapshot_id"
+            ]
+            referenced_ids = {
+                evidence_id
+                for item in all_evidence.values()
+                for evidence_id in item.supporting_evidence_ids
+            }
+            with closing(sqlite3.connect(database.path)) as connection:
+                persisted_ids = {
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT id FROM evidence WHERE snapshot_id = ?",
+                        (latest_snapshot_id,),
+                    )
+                }
+            self.assertTrue(referenced_ids <= persisted_ids)
 
     def test_unavailable_is_not_presented_as_observed(self) -> None:
         evidence = snapshot_evidence({"availability": {"vehicles": {
@@ -337,16 +445,41 @@ class EvidenceLineageTests(unittest.TestCase):
             [item.to_dict() for item in snapshot_evidence(current)],
         )
 
+    def test_evidence_ids_ignore_operational_import_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "evidence-id.zip"
+            create_save_zip(archive)
+            snapshot = snapshot_from_zip(archive).to_dict()
+            first = copy.deepcopy(snapshot)
+            second = copy.deepcopy(snapshot)
+            first["metadata"]["imported_at"] = "2025-01-01T00:00:00Z"
+            second["metadata"]["imported_at"] = "2035-01-01T00:00:00Z"
+
+            first_ids = [item.evidence_id for item in snapshot_evidence(first)]
+            second_ids = [item.evidence_id for item in snapshot_evidence(second)]
+            self.assertEqual(first_ids, second_ids)
+            self.assertEqual(
+                first_ids,
+                [item.evidence_id for item in snapshot_evidence(first)],
+            )
+
 
 class DefensivePersistenceTests(unittest.TestCase):
     def test_direct_persistence_rejects_unsafe_provenance_atomically(self) -> None:
         unsafe_values = (
             ("source_archive", r"C:\synthetic\save.zip"),
             ("save_root", r"C:\synthetic\save"),
+            ("source_archive", "C:/synthetic/save.zip"),
             ("source_archive", r"\\server\share\save.zip"),
+            ("save_root", "//server/share/save.zip"),
             ("save_root", "/home/user/save.zip"),
+            ("source_archive", "/var/data/save.zip"),
             ("source_archive", "../save.zip"),
+            ("save_root", r"..\save.zip"),
+            ("source_archive", "folder/../../save.zip"),
             ("save_root", "arquivo:stream"),
+            ("source_archive", "file:///home/user/save.zip"),
+            ("save_root", "~/save.zip"),
         )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -378,6 +511,11 @@ class DefensivePersistenceTests(unittest.TestCase):
                             "snapshots",
                             "timeline_entries",
                             "evidence",
+                            "campaign_identity_signals",
+                            "campaign_associations",
+                            "campaign_milestones",
+                            "milestones",
+                            "recommendations",
                         ):
                             self.assertEqual(
                                 connection.execute(
@@ -402,6 +540,36 @@ class DefensivePersistenceTests(unittest.TestCase):
             serialized = json_dumps(stored, sort_keys=True)
             self.assertNotIn(str(root.resolve()), serialized)
             self.assertIn("nested/logical-save", serialized)
+
+    def test_campaign_evidence_provenance_is_validated_before_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "identity.zip"
+            create_save_zip(
+                archive,
+                files=campaign_files(native_campaign_id="round3-identity-origin"),
+            )
+            snapshot, fingerprint = snapshot_and_fingerprint_from_zip(archive)
+            identity = resolve_campaign_identity(snapshot, fingerprint)
+            malicious_evidence = replace(
+                identity.evidence[0],
+                source_path="../private/value",
+            )
+            malicious_identity = replace(
+                identity,
+                evidence=(malicious_evidence,),
+            )
+            database = AlquimistaDatabase(root / "memory.sqlite3")
+
+            with self.assertRaises(UnsafeProvenanceError) as caught:
+                database.persist_import(
+                    snapshot,
+                    fingerprint,
+                    malicious_identity,
+                )
+
+            self.assertNotIn("../private/value", str(caught.exception))
+            self.assertFalse(database.path.exists())
 
     def test_data_origin_is_also_validated(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -473,6 +641,13 @@ class ZipDomainErrorTests(unittest.TestCase):
             with self.assertRaisesRegex(InvalidArchiveError, "não suportado"):
                 snapshot_from_zip(archive)
 
+    def test_truncated_member_is_domain_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = self._archive(Path(temporary), "truncated.zip")
+            _declare_truncated_member(archive, "Money.json")
+            with self.assertRaises(InvalidArchiveError):
+                snapshot_from_zip(archive)
+
     def test_failure_during_member_read_is_domain_error(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             archive = self._archive(Path(temporary), "read.zip")
@@ -482,6 +657,38 @@ class ZipDomainErrorTests(unittest.TestCase):
             ):
                 with self.assertRaises(InvalidArchiveError):
                     snapshot_from_zip(archive)
+
+    def test_expected_zipfile_open_errors_are_domain_errors(self) -> None:
+        errors = (
+            RuntimeError("password required for extraction"),
+            NotImplementedError("synthetic unsupported compressor"),
+        )
+        for error in errors:
+            with (
+                self.subTest(error=type(error).__name__),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                archive = self._archive(Path(temporary), "open-error.zip")
+                with patch("zipfile.ZipFile.open", side_effect=error):
+                    with self.assertRaises(InvalidArchiveError):
+                        snapshot_from_zip(archive)
+
+    def test_programming_errors_are_not_masked_as_archive_errors(self) -> None:
+        for error in (
+            AssertionError("synthetic assertion"),
+            TypeError("synthetic type failure"),
+        ):
+            with (
+                self.subTest(error=type(error).__name__),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                archive = self._archive(Path(temporary), "programming-error.zip")
+                with patch(
+                    "o_alquimista.archive._copy_member_limited",
+                    side_effect=error,
+                ):
+                    with self.assertRaises(type(error)):
+                        snapshot_from_zip(archive)
 
     def test_cli_crc_failure_is_clean_read_only_and_cleans_temporary(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -524,6 +731,124 @@ class ZipDomainErrorTests(unittest.TestCase):
                 all(not directory.exists() for directory in created_directories)
             )
             self.assertFalse(output.exists())
+
+    def test_cli_zip_failure_matrix_is_clean_and_atomic(self) -> None:
+        cases = (
+            ("invalid", lambda path: path.write_bytes(b"not a zip")),
+            (
+                "central",
+                lambda path: path.write_bytes(
+                    path.read_bytes().replace(b"PK\x01\x02", b"ZZ\x01\x02", 1)
+                ),
+            ),
+            ("crc", lambda path: _mutate_member_payload(path, "Money.json")),
+            (
+                "encrypted",
+                lambda path: _set_zip_member_bits(
+                    path,
+                    "Money.json",
+                    encrypted=True,
+                ),
+            ),
+            (
+                "unsupported",
+                lambda path: _set_zip_member_bits(
+                    path,
+                    "Money.json",
+                    compression_method=99,
+                ),
+            ),
+            (
+                "truncated",
+                lambda path: _declare_truncated_member(path, "Money.json"),
+            ),
+        )
+        for case_name, mutate in cases:
+            with self.subTest(case=case_name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                archive = self._archive(root, f"{case_name}.zip")
+                database = root / "memory.sqlite3"
+                mutate(archive)
+                original = archive.read_bytes()
+                created_directories: list[Path] = []
+                real_temporary_directory = tempfile.TemporaryDirectory
+
+                def tracking_temporary_directory(
+                    *args: object,
+                    **kwargs: object,
+                ):
+                    kwargs["dir"] = root
+                    context = real_temporary_directory(*args, **kwargs)
+                    created_directories.append(Path(context.name))
+                    return context
+
+                stderr = io.StringIO()
+                with (
+                    patch(
+                        "o_alquimista.archive.tempfile.TemporaryDirectory",
+                        side_effect=tracking_temporary_directory,
+                    ),
+                    redirect_stderr(stderr),
+                ):
+                    exit_code = main(
+                        [
+                            "import",
+                            str(archive),
+                            "--database",
+                            str(database),
+                        ]
+                    )
+
+                error = stderr.getvalue()
+                self.assertEqual(exit_code, 2)
+                self.assertNotIn("Traceback", error)
+                self.assertNotIn(str(root.resolve()), error)
+                self.assertEqual(archive.read_bytes(), original)
+                self.assertTrue(
+                    all(not path.exists() for path in created_directories)
+                )
+                self.assertFalse(database.exists())
+
+    def test_simulated_extraction_failure_is_domain_error_and_cleans_up(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = self._archive(root, "extraction.zip")
+            database = root / "memory.sqlite3"
+            original = archive.read_bytes()
+            created_directories: list[Path] = []
+            real_temporary_directory = tempfile.TemporaryDirectory
+
+            def tracking_temporary_directory(*args: object, **kwargs: object):
+                kwargs["dir"] = root
+                context = real_temporary_directory(*args, **kwargs)
+                created_directories.append(Path(context.name))
+                return context
+
+            stderr = io.StringIO()
+            with (
+                patch(
+                    "o_alquimista.archive.tempfile.TemporaryDirectory",
+                    side_effect=tracking_temporary_directory,
+                ),
+                patch(
+                    "o_alquimista.archive._copy_member_limited",
+                    side_effect=EOFError("synthetic truncated stream"),
+                ),
+                redirect_stderr(stderr),
+            ):
+                exit_code = main(
+                    ["import", str(archive), "--database", str(database)]
+                )
+
+            self.assertEqual(exit_code, 2)
+            self.assertNotIn("Traceback", stderr.getvalue())
+            self.assertNotIn(str(root.resolve()), stderr.getvalue())
+            self.assertEqual(archive.read_bytes(), original)
+            self.assertTrue(created_directories)
+            self.assertTrue(
+                all(not path.exists() for path in created_directories)
+            )
+            self.assertFalse(database.exists())
 
 
 class FutureSchemaTests(unittest.TestCase):
@@ -581,3 +906,30 @@ class FutureSchemaTests(unittest.TestCase):
                 }
                 self.assertEqual(tables, {"future_sentinel"})
                 self.assertEqual(connection.execute("SELECT 1").fetchone()[0], 1)
+
+    def test_very_future_schema_is_also_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            database_path = Path(temporary) / "future-999.sqlite3"
+            with closing(sqlite3.connect(database_path)) as connection:
+                connection.execute("CREATE TABLE sentinel (value TEXT)")
+                connection.execute("INSERT INTO sentinel VALUES ('unchanged')")
+                connection.execute("PRAGMA user_version = 999")
+                connection.commit()
+            before = database_path.read_bytes()
+
+            with self.assertRaisesRegex(
+                UnsupportedDatabaseVersionError,
+                "versão compatível",
+            ):
+                AlquimistaDatabase(database_path).initialize()
+
+            self.assertEqual(database_path.read_bytes(), before)
+            with closing(sqlite3.connect(database_path)) as connection:
+                self.assertEqual(
+                    connection.execute("PRAGMA user_version").fetchone()[0],
+                    999,
+                )
+                self.assertEqual(
+                    connection.execute("SELECT value FROM sentinel").fetchone()[0],
+                    "unchanged",
+                )
