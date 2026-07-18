@@ -19,7 +19,7 @@ from .analysis import (
     timeline_sort_key,
 )
 from .errors import RecordNotFoundError
-from .evidence import snapshot_evidence
+from .evidence import deterministic_id, snapshot_evidence
 from .identity import resolve_campaign_identity
 from .memory_models import (
     ArchiveFingerprint,
@@ -31,7 +31,7 @@ from .memory_models import (
 )
 from .models import Milestone, NormalizedSnapshot, Recommendation
 
-DATABASE_VERSION = 2
+DATABASE_VERSION = 3
 
 BASE_SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -120,6 +120,35 @@ CREATE TABLE IF NOT EXISTS snapshot_relationships (
     UNIQUE(previous_snapshot_id, current_snapshot_id, relationship_type)
 );
 
+CREATE TABLE IF NOT EXISTS campaign_identity_signals (
+    campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    signal_kind TEXT NOT NULL,
+    signal_digest TEXT NOT NULL,
+    source_file TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    PRIMARY KEY (campaign_id, signal_kind, signal_digest)
+);
+
+CREATE TABLE IF NOT EXISTS campaign_associations (
+    id TEXT PRIMARY KEY,
+    left_campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    right_campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    association_state TEXT NOT NULL CHECK (
+        association_state IN ('candidate', 'explicitly_linked')
+    ),
+    evidence_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(left_campaign_id, right_campaign_id)
+);
+
+CREATE TABLE IF NOT EXISTS campaign_milestones (
+    id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    snapshot_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_imports_campaign ON imports(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_imports_imported_at ON imports(imported_at);
 CREATE INDEX IF NOT EXISTS idx_imports_archive_sha ON imports(archive_sha256);
@@ -131,12 +160,22 @@ CREATE INDEX IF NOT EXISTS idx_evidence_snapshot ON evidence(snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_campaign ON evidence(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_relationship_current
     ON snapshot_relationships(current_snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_campaign_signal_digest
+    ON campaign_identity_signals(signal_kind, signal_digest);
+CREATE INDEX IF NOT EXISTS idx_campaign_association_left
+    ON campaign_associations(left_campaign_id);
+CREATE INDEX IF NOT EXISTS idx_campaign_association_right
+    ON campaign_associations(right_campaign_id);
+CREATE INDEX IF NOT EXISTS idx_campaign_milestone_snapshot
+    ON campaign_milestones(snapshot_id);
 """
 
 CAMPAIGN_COLUMNS: dict[str, str] = {
+    "resolution_state": "TEXT",
     "identity_strategy": "TEXT",
     "confidence": "TEXT",
     "evidence_json": "TEXT",
+    "association_signals_json": "TEXT",
     "explanation": "TEXT",
 }
 
@@ -227,6 +266,28 @@ class AlquimistaDatabase:
                 "imports",
                 IMPORT_COLUMNS,
             )
+            connection.execute(
+                """
+                UPDATE campaigns
+                SET resolution_state = CASE
+                    WHEN identity_strategy = 'native_campaign_identifier'
+                        AND confidence = 'high' THEN 'resolved'
+                    WHEN identity_strategy IS NULL THEN 'unresolved'
+                    WHEN identity_strategy = 'archive_scoped_fallback'
+                        THEN 'unresolved'
+                    ELSE 'candidate'
+                END
+                WHERE resolution_state IS NULL
+                """
+            )
+            connection.execute(
+                """
+                UPDATE campaigns SET association_signals_json = '[]'
+                WHERE association_signals_json IS NULL
+                """
+            )
+            self._backfill_identity_signals(connection)
+            self._migrate_detected_milestones(connection)
             legacy_hashes = connection.execute(
                 """
                 SELECT archive_sha256, MIN(imported_at) AS imported_at
@@ -258,6 +319,127 @@ class AlquimistaDatabase:
                     (fingerprint_id, row["archive_sha256"]),
                 )
             connection.execute(f"PRAGMA user_version = {DATABASE_VERSION}")
+
+    @classmethod
+    def _migrate_detected_milestones(
+        cls,
+        connection: sqlite3.Connection,
+    ) -> None:
+        rows = connection.execute(
+            """
+            SELECT
+                m.id,
+                m.snapshot_id,
+                m.payload_json,
+                m.created_at,
+                i.campaign_id
+            FROM milestones AS m
+            JOIN snapshots AS s ON s.id = m.snapshot_id
+            JOIN imports AS i ON i.id = s.import_id
+            """
+        ).fetchall()
+        migrated_ids: list[str] = []
+        for row in rows:
+            try:
+                payload = json.loads(row["payload_json"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict) or "milestone_id" not in payload:
+                continue
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO campaign_milestones
+                    (id, campaign_id, snapshot_id, payload_json, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    row["id"],
+                    row["campaign_id"],
+                    row["snapshot_id"],
+                    row["payload_json"],
+                    row["created_at"],
+                ),
+            )
+            migrated_ids.append(str(row["id"]))
+        connection.executemany(
+            "DELETE FROM milestones WHERE id = ?",
+            [(milestone_id,) for milestone_id in migrated_ids],
+        )
+
+    @classmethod
+    def _backfill_identity_signals(
+        cls,
+        connection: sqlite3.Connection,
+    ) -> None:
+        rows = connection.execute(
+            """
+            SELECT id, evidence_json
+            FROM campaigns
+            WHERE evidence_json IS NOT NULL AND evidence_json <> ''
+            """
+        ).fetchall()
+        for row in rows:
+            try:
+                evidence_items = json.loads(row["evidence_json"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            signals: list[dict[str, str]] = []
+            for evidence in evidence_items if isinstance(evidence_items, list) else []:
+                normalized = (
+                    evidence.get("normalized_value")
+                    if isinstance(evidence, dict)
+                    else None
+                )
+                if isinstance(normalized, dict):
+                    organisation = normalized.get("organisation")
+                    if isinstance(organisation, str):
+                        signals.append(
+                            {
+                                "kind": "organisation",
+                                "digest": organisation,
+                                "source_file": "Game.json",
+                                "source_path": "OrganisationName",
+                            }
+                        )
+                    players = normalized.get("players")
+                    if isinstance(players, list):
+                        signals.extend(
+                            {
+                                "kind": "player",
+                                "digest": digest,
+                                "source_file": "Players/*",
+                                "source_path": "$directory",
+                            }
+                            for digest in players
+                            if isinstance(digest, str)
+                        )
+            if not signals:
+                continue
+            connection.executemany(
+                """
+                INSERT OR IGNORE INTO campaign_identity_signals
+                    (campaign_id, signal_kind, signal_digest,
+                     source_file, source_path)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        row["id"],
+                        signal["kind"],
+                        signal["digest"],
+                        signal["source_file"],
+                        signal["source_path"],
+                    )
+                    for signal in signals
+                ],
+            )
+            connection.execute(
+                """
+                UPDATE campaigns SET association_signals_json = ?
+                WHERE id = ?
+                """,
+                (cls._json(signals), row["id"]),
+            )
 
     @staticmethod
     def _json(value: Any) -> str:
@@ -343,22 +525,117 @@ class AlquimistaDatabase:
             """
             INSERT OR IGNORE INTO campaigns
                 (id, display_name, source_hint, created_at,
-                 identity_strategy, confidence, evidence_json, explanation)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 resolution_state, identity_strategy, confidence,
+                 evidence_json, association_signals_json, explanation)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 identity.campaign_id,
                 f"Campanha {identity.campaign_id[-8:]}",
                 identity.campaign_id,
                 imported_at,
+                identity.resolution_state,
                 identity.strategy,
                 identity.confidence,
                 AlquimistaDatabase._json(
                     [item.to_dict() for item in identity.evidence]
                 ),
+                AlquimistaDatabase._json(
+                    [item.to_dict() for item in identity.association_signals]
+                ),
                 identity.explanation,
             ),
         )
+
+    @classmethod
+    def _persist_identity_signals_and_associations(
+        cls,
+        connection: sqlite3.Connection,
+        identity: CampaignIdentity,
+        created_at: str,
+    ) -> None:
+        if not identity.association_signals:
+            return
+        connection.executemany(
+            """
+            INSERT OR IGNORE INTO campaign_identity_signals
+                (campaign_id, signal_kind, signal_digest,
+                 source_file, source_path)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    identity.campaign_id,
+                    signal.kind,
+                    signal.digest,
+                    signal.source_file,
+                    signal.source_path,
+                )
+                for signal in identity.association_signals
+            ],
+        )
+        matches = connection.execute(
+            """
+            SELECT DISTINCT other.campaign_id
+            FROM campaign_identity_signals AS own
+            JOIN campaign_identity_signals AS other
+              ON other.signal_kind = own.signal_kind
+             AND other.signal_digest = own.signal_digest
+            WHERE own.campaign_id = ?
+              AND other.campaign_id <> ?
+            ORDER BY other.campaign_id
+            """,
+            (identity.campaign_id, identity.campaign_id),
+        ).fetchall()
+        for match in matches:
+            other_id = str(match["campaign_id"])
+            left_id, right_id = sorted((identity.campaign_id, other_id))
+            shared = connection.execute(
+                """
+                SELECT own.signal_kind, own.signal_digest
+                FROM campaign_identity_signals AS own
+                JOIN campaign_identity_signals AS other
+                  ON other.signal_kind = own.signal_kind
+                 AND other.signal_digest = own.signal_digest
+                WHERE own.campaign_id = ? AND other.campaign_id = ?
+                ORDER BY own.signal_kind, own.signal_digest
+                """,
+                (identity.campaign_id, other_id),
+            ).fetchall()
+            association_id = deterministic_id(
+                "association",
+                left_id,
+                right_id,
+            )
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO campaign_associations
+                    (id, left_campaign_id, right_campaign_id,
+                     association_state, evidence_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    association_id,
+                    left_id,
+                    right_id,
+                    "candidate",
+                    cls._json(
+                        {
+                            "shared_signals": [
+                                {
+                                    "kind": row["signal_kind"],
+                                    "digest": row["signal_digest"],
+                                }
+                                for row in shared
+                            ],
+                            "explanation": (
+                                "Sinais fracos coincidem; campanhas não foram unidas."
+                            ),
+                        }
+                    ),
+                    created_at,
+                ),
+            )
 
     @staticmethod
     def _timeline_rows(
@@ -609,6 +886,11 @@ class AlquimistaDatabase:
                 ),
             )
             self._ensure_campaign(connection, campaign_identity, imported_at)
+            self._persist_identity_signals_and_associations(
+                connection,
+                campaign_identity,
+                imported_at,
+            )
             connection.execute(
                 """
                 INSERT INTO imports
@@ -812,11 +1094,18 @@ class AlquimistaDatabase:
                 SELECT
                     c.id AS campaign_id,
                     c.display_name,
+                    c.resolution_state,
                     c.identity_strategy,
                     c.confidence,
                     c.explanation,
                     COUNT(DISTINCT i.id) AS import_count,
-                    COUNT(DISTINCT s.id) AS snapshot_count
+                    COUNT(DISTINCT s.id) AS snapshot_count,
+                    (
+                        SELECT COUNT(*)
+                        FROM campaign_associations AS a
+                        WHERE a.left_campaign_id = c.id
+                           OR a.right_campaign_id = c.id
+                    ) AS candidate_association_count
                 FROM campaigns AS c
                 LEFT JOIN imports AS i ON i.campaign_id = c.id
                 LEFT JOIN snapshots AS s ON s.import_id = i.id
@@ -825,6 +1114,40 @@ class AlquimistaDatabase:
                 """
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def campaign_associations(self, campaign_id: str) -> list[dict[str, Any]]:
+        self.initialize()
+        with self._connection() as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM campaigns WHERE id = ?",
+                (campaign_id,),
+            ).fetchone()
+            if exists is None:
+                raise RecordNotFoundError(f"Campanha não encontrada: {campaign_id}")
+            rows = connection.execute(
+                """
+                SELECT
+                    a.id AS association_id,
+                    a.association_state,
+                    CASE
+                        WHEN a.left_campaign_id = ? THEN a.right_campaign_id
+                        ELSE a.left_campaign_id
+                    END AS candidate_campaign_id,
+                    a.evidence_json
+                FROM campaign_associations AS a
+                WHERE a.left_campaign_id = ? OR a.right_campaign_id = ?
+                ORDER BY candidate_campaign_id, association_id
+                """,
+                (campaign_id, campaign_id, campaign_id),
+            ).fetchall()
+        associations: list[dict[str, Any]] = []
+        for row in rows:
+            association = dict(row)
+            association["evidence"] = json.loads(
+                association.pop("evidence_json")
+            )
+            associations.append(association)
+        return associations
 
     def campaign_history(self, campaign_id: str) -> list[dict[str, Any]]:
         self.initialize()

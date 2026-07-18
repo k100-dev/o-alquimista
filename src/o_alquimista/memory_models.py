@@ -7,6 +7,12 @@ from typing import Any, Literal
 
 EvidenceCategory = Literal["observed", "derived", "inferred", "unavailable"]
 ConfidenceLevel = Literal["high", "medium", "low", "unavailable"]
+CampaignResolutionState = Literal[
+    "resolved",
+    "candidate",
+    "unresolved",
+    "explicitly_linked",
+]
 ChangeStatus = Literal[
     "added",
     "removed",
@@ -61,10 +67,23 @@ class Evidence:
 @dataclass(frozen=True, slots=True)
 class CampaignIdentity:
     campaign_id: str
+    resolution_state: CampaignResolutionState
     strategy: str
     confidence: ConfidenceLevel
     evidence: tuple[Evidence, ...]
+    association_signals: tuple["CampaignAssociationSignal", ...]
     explanation: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignAssociationSignal:
+    kind: str
+    digest: str
+    source_file: str
+    source_path: str
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

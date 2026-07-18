@@ -103,6 +103,12 @@ def _parser() -> argparse.ArgumentParser:
     campaign_history.add_argument("campaign_id")
     campaign_history.add_argument("--database", required=True, type=Path)
     _add_output_options(campaign_history)
+    campaign_associations = campaign_subcommands.add_parser(
+        "associations",
+        help="Lista associações candidatas sem unir campanhas",
+    )
+    campaign_associations.add_argument("campaign_id")
+    campaign_associations.add_argument("--database", required=True, type=Path)
 
     compare_command = subcommands.add_parser(
         "compare",
@@ -292,6 +298,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 0
             if args.campaign_command == "history":
                 _timeline_command(args)
+                return 0
+            if args.campaign_command == "associations":
+                print(
+                    _json_text(
+                        {
+                            "campaign_id": args.campaign_id,
+                            "associations": database.campaign_associations(
+                                args.campaign_id
+                            ),
+                        }
+                    )
+                )
                 return 0
 
         if args.command == "compare":

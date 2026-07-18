@@ -7,10 +7,12 @@ import json
 import zipfile
 from pathlib import Path
 from typing import Any, Iterable
+from uuid import uuid4
 
 from .archive import validate_archive
 from .memory_models import (
     ArchiveFingerprint,
+    CampaignAssociationSignal,
     CampaignIdentity,
     ConfidenceLevel,
     Evidence,
@@ -77,7 +79,47 @@ def _iter_unknown_fields(snapshot: NormalizedSnapshot) -> Iterable[UnknownField]
     yield from snapshot.unknown
 
 
-def _native_identity(snapshot: NormalizedSnapshot) -> CampaignIdentity | None:
+def _association_signals(
+    snapshot: NormalizedSnapshot,
+) -> tuple[CampaignAssociationSignal, ...]:
+    signals: list[CampaignAssociationSignal] = []
+    organisation = snapshot.metadata.organisation_name
+    if organisation:
+        signals.append(
+            CampaignAssociationSignal(
+                kind="organisation",
+                digest=_stable_digest(organisation),
+                source_file="Game.json",
+                source_path="OrganisationName",
+            )
+        )
+    for player_id in sorted(
+        str(player.get("player"))
+        for player in snapshot.players
+        if player.get("player")
+    ):
+        signals.append(
+            CampaignAssociationSignal(
+                kind="player",
+                digest=_stable_digest(player_id),
+                source_file="Players/*",
+                source_path="$directory",
+            )
+        )
+    return tuple(
+        sorted(signals, key=lambda signal: (signal.kind, signal.digest))
+    )
+
+
+def _provisional_campaign_id() -> str:
+    """Cria identidade local sem depender de ZIP, caminho, nome ou horário."""
+    return f"campaign-{uuid4().hex}"
+
+
+def _native_identity(
+    snapshot: NormalizedSnapshot,
+    association_signals: tuple[CampaignAssociationSignal, ...],
+) -> CampaignIdentity | None:
     candidates = sorted(
         (
             field
@@ -115,14 +157,40 @@ def _native_identity(snapshot: NormalizedSnapshot) -> CampaignIdentity | None:
         confidence=confidence,
         related_entity="campaign",
     )
+    if confidence == "high":
+        return CampaignIdentity(
+            campaign_id=f"campaign-{protected_digest[:32]}",
+            resolution_state="resolved",
+            strategy="native_campaign_identifier",
+            confidence="high",
+            evidence=(evidence,),
+            association_signals=association_signals,
+            explanation=(
+                "Identidade resolvida por CampaignId observado em Game.json; "
+                "o valor original foi protegido por hash."
+            ),
+        )
+    native_signal = CampaignAssociationSignal(
+        kind=selected.name.casefold(),
+        digest=protected_digest,
+        source_file=selected.origin.file,
+        source_path=selected.origin.field,
+    )
     return CampaignIdentity(
-        campaign_id=f"campaign-{protected_digest[:32]}",
-        strategy="native_campaign_identifier",
-        confidence=confidence,
+        campaign_id=_provisional_campaign_id(),
+        resolution_state="candidate",
+        strategy="ambiguous_native_identifier",
+        confidence="low",
         evidence=(evidence,),
+        association_signals=tuple(
+            sorted(
+                (*association_signals, native_signal),
+                key=lambda signal: (signal.kind, signal.digest),
+            )
+        ),
         explanation=(
-            "Identidade derivada de um candidato a identificador nativo em "
-            "Game.json; o valor original foi protegido por hash."
+            "GameId/SaveId é apenas candidato de associação; sua estabilidade "
+            "como identidade de campanha não está comprovada."
         ),
     )
 
@@ -132,66 +200,48 @@ def resolve_campaign_identity(
     archive_fingerprint: ArchiveFingerprint,
 ) -> CampaignIdentity:
     """Resolve identidade sem usar nome, caminho, dinheiro, dia ou inventário."""
-    native = _native_identity(snapshot)
+    del archive_fingerprint
+    association_signals = _association_signals(snapshot)
+    native = _native_identity(snapshot, association_signals)
     if native is not None:
         return native
 
-    organisation = snapshot.metadata.organisation_name
-    player_ids = sorted(
-        str(player.get("player"))
-        for player in snapshot.players
-        if player.get("player")
-    )
-    protected_signals: dict[str, Any] = {}
-    sources: list[str] = []
-    if organisation:
-        protected_signals["organisation"] = _stable_digest(organisation)
-        sources.append("Game.json:OrganisationName")
-    if player_ids:
-        protected_signals["players"] = [_stable_digest(value) for value in player_ids]
-        sources.append("Players/*")
-
-    if protected_signals:
-        digest = _stable_digest(protected_signals)
-        confidence = "medium" if organisation and player_ids else "low"
-        strategy = (
-            "stable_internal_identifiers"
-            if confidence == "medium"
-            else "partial_internal_identifier"
-        )
+    if association_signals:
+        protected_signals = [
+            {"kind": signal.kind, "digest": signal.digest}
+            for signal in association_signals
+        ]
         evidence = Evidence(
             evidence_id=_evidence_id("evidence", protected_signals),
             category="derived",
-            source_file=";".join(sources),
+            source_file=";".join(
+                sorted({signal.source_file for signal in association_signals})
+            ),
             source_path=None,
             field_name=None,
             raw_value=None,
             normalized_value=protected_signals,
-            calculation="SHA-256 de sinais internos estáveis e ordenados.",
+            calculation="SHA-256 individual de sinais fracos e ordenados.",
             explanation=(
-                "Não há ID nativo comprovado; a identidade combina sinais internos "
-                "protegidos por hash."
+                "Sinais fracos foram preservados apenas para sugerir associações; "
+                "eles não consolidam campanhas automaticamente."
             ),
-            confidence=confidence,
+            confidence="low",
             related_entity="campaign",
         )
         return CampaignIdentity(
-            campaign_id=f"campaign-{digest[:32]}",
-            strategy=strategy,
-            confidence=confidence,
+            campaign_id=_provisional_campaign_id(),
+            resolution_state="candidate",
+            strategy="weak_signal_candidate",
+            confidence="low",
             evidence=(evidence,),
+            association_signals=association_signals,
             explanation=(
-                "Combinação determinística de identificadores internos. Pode agrupar "
-                "campanhas distintas do mesmo jogador/organização."
+                "Campanha provisória independente. Organização e players podem "
+                "gerar associações candidatas, nunca união automática."
             ),
         )
 
-    fallback_digest = _stable_digest(
-        {
-            "archive": archive_fingerprint.digest,
-            "game_version": snapshot.metadata.game_version,
-        }
-    )
     unavailable = Evidence(
         evidence_id=_evidence_id("evidence", "campaign-identity-unavailable"),
         category="unavailable",
@@ -209,12 +259,14 @@ def resolve_campaign_identity(
         related_entity="campaign",
     )
     return CampaignIdentity(
-        campaign_id=f"campaign-{fallback_digest[:32]}",
-        strategy="archive_scoped_fallback",
-        confidence="low",
+        campaign_id=_provisional_campaign_id(),
+        resolution_state="unresolved",
+        strategy="unresolved_without_stable_identity",
+        confidence="unavailable",
         evidence=(unavailable,),
+        association_signals=(),
         explanation=(
-            "Fallback limitado ao conteúdo deste arquivo. Snapshots futuros podem "
-            "não ser associados automaticamente."
+            "Campanha provisória sem identidade observável. Nenhum fingerprint, "
+            "nome, caminho ou horário foi usado no campaign_id."
         ),
     )
