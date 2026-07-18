@@ -50,10 +50,11 @@ limpa em sucesso ou falha.
 ## Proveniência persistida
 
 `persist_import` não confia na sanitização da CLI. Antes de qualquer `INSERT`,
-ele percorre `source_archive`, `save_root`, `source_file`, `source_files` e
-origens equivalentes do snapshot. Somente caminhos lógicos relativos são
-aceitos; caminhos POSIX absolutos, drives Windows, UNC, segmentos `..`, ADS e
-NUL são rejeitados com rollback integral. Valores relativos como
+ele percorre `source_archive`, `save_root`, `source_file`, `source_files`,
+`source_path`, `logical_path`, sinais de identidade, evidências e origens
+equivalentes. Somente caminhos lógicos relativos são aceitos; caminhos POSIX
+absolutos, drives Windows, UNC, segmentos `..`, ADS, `file://`, atalhos de home
+e NUL são rejeitados com rollback integral. Valores relativos como
 `exports/save.zip`, `Players/local/Inventory.json` e
 `nested/logical-save` permanecem válidos.
 

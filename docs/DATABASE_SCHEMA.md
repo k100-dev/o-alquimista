@@ -35,7 +35,10 @@
 - conexões fecham em `finally`, inclusive em erro de configuração.
 - a fronteira `persist_import` valida caminhos de proveniência antes de
   inicializar ou inserir registros; caminhos absolutos, drive Windows, UNC,
-  `..` e ADS são rejeitados mesmo em chamadas diretas;
+  `..`, ADS, `file://` e atalhos de home são rejeitados mesmo em chamadas
+  diretas;
+- a mesma validação cobre `source_path`, `logical_path`, sinais de identidade e
+  todas as evidências antes de sua persistência;
 - `imported_at` é somente metadado operacional e não participa da ordenação da
   timeline.
 

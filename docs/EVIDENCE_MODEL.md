@@ -39,6 +39,7 @@ justificativa e limitações.
   `unavailable`;
 - evidências derivadas enumeram seus `supporting_evidence_ids` quando dependem
   de outras evidências;
+- toda evidência derivada registra o cálculo e ao menos uma limitação explícita;
 - justificativas de confiança são específicas para cada regra.
 
 IDs referenciados são determinísticos e persistidos no escopo do snapshot mais
