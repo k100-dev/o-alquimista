@@ -17,7 +17,10 @@ from .analysis import (
     generate_recommendations,
     timeline_sort_key,
 )
-from .errors import RecordNotFoundError
+from .errors import (
+    RecordNotFoundError,
+    UnsupportedDatabaseVersionError,
+)
 from .evidence import deterministic_id, snapshot_evidence
 from .identity import resolve_campaign_identity
 from .json_codec import dumps as json_dumps
@@ -256,6 +259,14 @@ class AlquimistaDatabase:
 
     def initialize(self) -> None:
         with self._connection() as connection:
+            current_version = int(
+                connection.execute("PRAGMA user_version").fetchone()[0]
+            )
+            if current_version > DATABASE_VERSION:
+                raise UnsupportedDatabaseVersionError(
+                    "O banco usa uma versão de schema mais nova que esta "
+                    f"aplicação (banco={current_version}, suportado={DATABASE_VERSION})."
+                )
             connection.executescript(
                 f"BEGIN IMMEDIATE;\n{BASE_SCHEMA}\n{MEMORY_SCHEMA}"
             )
