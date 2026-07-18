@@ -43,13 +43,13 @@ class Metadata:
 
 @dataclass(frozen=True, slots=True)
 class Finance:
-    online_balance: float
-    loose_cash: float
-    liquid_cash_estimate: float
-    networth: float
-    lifetime_earnings: float
-    weekly_deposit_sum: float
-    inventory_list_price_estimate: float
+    online_balance: float | None
+    loose_cash: float | None
+    liquid_cash_estimate: float | None
+    networth: float | None
+    lifetime_earnings: float | None
+    weekly_deposit_sum: float | None
+    inventory_list_price_estimate: float | None
     origins: dict[str, DataOrigin] = field(default_factory=dict)
     unknown: tuple[UnknownField, ...] = ()
 

@@ -5,6 +5,7 @@ from o_alquimista.parser import (
     load_json,
     read_save,
     read_save_model,
+    snapshot_and_fingerprint_from_zip,
     snapshot_from_zip,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "load_json",
     "read_save",
     "read_save_model",
+    "snapshot_and_fingerprint_from_zip",
     "snapshot_from_zip",
 ]

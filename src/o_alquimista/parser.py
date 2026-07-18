@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
 from .archive import ESSENTIAL_FILES, extracted_save
-from .errors import IncompleteSaveError, SaveDataError
+from .errors import IncompleteSaveError, InvalidArchiveError, SaveDataError
+from .identity import fingerprint_archive
+from .memory_models import ArchiveFingerprint
 from .models import (
     DataOrigin,
     Employee,
@@ -66,6 +67,15 @@ def _number(value: Any) -> float:
         return float(value or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _optional_number(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _unknown_fields(
@@ -301,14 +311,6 @@ def _parse_vehicles(
     )
 
 
-def _archive_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _collect_unmapped_files(
     save_root: Path,
     handled_files: set[Path],
@@ -334,6 +336,7 @@ def read_save_model(
     *,
     source_archive: Path | None = None,
     archive_root: str | None = None,
+    archive_fingerprint: ArchiveFingerprint | None = None,
 ) -> NormalizedSnapshot:
     """Lê uma raiz já validada sem realizar nenhuma escrita nela."""
     save_root = save_root.expanduser().resolve()
@@ -361,12 +364,14 @@ def read_save_model(
 
     all_items: list[InventoryItem] = []
     players: list[dict[str, Any]] = []
+    inventory_scope_observed = False
     players_dir = save_root / "Players"
     if players_dir.is_dir():
         for player_dir in sorted(path for path in players_dir.iterdir() if path.is_dir()):
             inventory_path = player_dir / "Inventory.json"
             if not inventory_path.is_file():
                 continue
+            inventory_scope_observed = True
             relative = inventory_path.relative_to(save_root).as_posix()
             inventory_data = _as_object(load_json(inventory_path), inventory_path)
             items = _parse_items(inventory_data.get("Items"), relative, "Items")
@@ -384,6 +389,7 @@ def read_save_model(
     world_entity_count = 0
     world_path = save_root / "WorldStorageEntities.json"
     if world_path.is_file():
+        inventory_scope_observed = True
         relative = "WorldStorageEntities.json"
         world = _as_object(decode_embedded_json(load_json(world_path)), world_path)
         entities = world.get("Entities") if isinstance(world.get("Entities"), list) else []
@@ -442,12 +448,16 @@ def read_save_model(
     )
 
     inventory = _summarize_items(all_items)
-    market_value = round(
-        sum(
-            quantity * _number(prices.get(item_id))
-            for item_id, quantity in inventory.quantities.items()
-        ),
-        2,
+    market_value = (
+        round(
+            sum(
+                quantity * _number(prices.get(item_id))
+                for item_id, quantity in inventory.quantities.items()
+            ),
+            2,
+        )
+        if inventory_scope_observed
+        else None
     )
     employees = tuple(
         employee
@@ -456,13 +466,17 @@ def read_save_model(
     )
 
     archive = source_archive.expanduser().resolve() if source_archive else None
+    if archive is not None and archive_fingerprint is None:
+        archive_fingerprint = fingerprint_archive(archive)
     version = money.get("GameVersion") or time_data.get("GameVersion")
     metadata = Metadata(
         product_name="O Alquimista",
         schema_version="1.0",
         imported_at=None,
         source_archive=archive.name if archive else None,
-        archive_sha256=_archive_sha256(archive) if archive else None,
+        archive_sha256=(
+            archive_fingerprint.digest if archive_fingerprint is not None else None
+        ),
         save_root=archive_root if archive_root is not None else save_root.name,
         game_version=str(version) if version is not None else None,
         organisation_name=(
@@ -486,17 +500,41 @@ def read_save_model(
         unknown=_unknown_fields(game, {"OrganisationName"}, "Game.json"),
     )
 
+    online_balance = _optional_number(money.get("OnlineBalance"))
+    loose_cash = inventory.cash if inventory_scope_observed else None
     return NormalizedSnapshot(
         metadata=metadata,
         finance=Finance(
-            online_balance=round(_number(money.get("OnlineBalance")), 2),
-            loose_cash=inventory.cash,
-            liquid_cash_estimate=round(
-                _number(money.get("OnlineBalance")) + inventory.cash, 2
+            online_balance=(
+                round(online_balance, 2) if online_balance is not None else None
             ),
-            networth=round(_number(money.get("Networth")), 2),
-            lifetime_earnings=round(_number(money.get("LifetimeEarnings")), 2),
-            weekly_deposit_sum=round(_number(money.get("WeeklyDepositSum")), 2),
+            loose_cash=loose_cash,
+            liquid_cash_estimate=(
+                round(online_balance + loose_cash, 2)
+                if online_balance is not None and loose_cash is not None
+                else None
+            ),
+            networth=(
+                round(value, 2)
+                if (value := _optional_number(money.get("Networth"))) is not None
+                else None
+            ),
+            lifetime_earnings=(
+                round(value, 2)
+                if (
+                    value := _optional_number(money.get("LifetimeEarnings"))
+                )
+                is not None
+                else None
+            ),
+            weekly_deposit_sum=(
+                round(value, 2)
+                if (
+                    value := _optional_number(money.get("WeeklyDepositSum"))
+                )
+                is not None
+                else None
+            ),
             inventory_list_price_estimate=market_value,
             origins={
                 "online_balance": _origin("Money.json", "OnlineBalance"),
@@ -604,10 +642,26 @@ def read_save(save_root: Path) -> dict[str, Any]:
 
 def snapshot_from_zip(archive_path: Path) -> NormalizedSnapshot:
     """Importa um ZIP em área temporária e devolve o snapshot em memória."""
+    snapshot, _ = snapshot_and_fingerprint_from_zip(archive_path)
+    return snapshot
+
+
+def snapshot_and_fingerprint_from_zip(
+    archive_path: Path,
+) -> tuple[NormalizedSnapshot, ArchiveFingerprint]:
+    """Lê o ZIP uma vez para identidade e uma vez para extração segura."""
     archive = archive_path.expanduser().resolve()
+    fingerprint = fingerprint_archive(archive)
     with extracted_save(archive) as (save_root, archive_root):
-        return read_save_model(
+        snapshot = read_save_model(
             save_root,
             source_archive=archive,
             archive_root=archive_root,
+            archive_fingerprint=fingerprint,
         )
+    verified_fingerprint = fingerprint_archive(archive)
+    if verified_fingerprint != fingerprint:
+        raise InvalidArchiveError(
+            "O ZIP foi alterado por outro processo durante a leitura."
+        )
+    return snapshot, fingerprint

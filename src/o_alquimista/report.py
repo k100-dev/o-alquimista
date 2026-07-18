@@ -6,7 +6,9 @@ from typing import Any
 
 
 def money(value: Any) -> str:
-    return f"${float(value or 0):,.2f}"
+    if value is None:
+        return "indisponível"
+    return f"${float(value):,.2f}"
 
 
 def build_markdown(snapshot: dict[str, Any]) -> str:
@@ -20,8 +22,12 @@ def build_markdown(snapshot: dict[str, Any]) -> str:
         f"- Organização: `{game.get('organisation_name') or 'não informada'}`",
         f"- Dia no jogo: **{game.get('elapsed_days')}**",
         (
-            "- Tempo jogado: "
-            f"**{round(float(game.get('playtime_seconds') or 0) / 3600, 2)} h**"
+            "- Tempo jogado: **indisponível**"
+            if game.get("playtime_seconds") is None
+            else (
+                "- Tempo jogado: "
+                f"**{round(float(game['playtime_seconds']) / 3600, 2)} h**"
+            )
         ),
         "",
         "## Financeiro",

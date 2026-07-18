@@ -29,6 +29,7 @@ MAX_ARCHIVE_ENTRIES = 5_000
 MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
 MAX_CENTRAL_DIRECTORY_BYTES = 16 * 1024 * 1024
 MAX_MEMBER_NAME_LENGTH = 1_024
+MAX_DIRECTORY_DEPTH = 16
 MAX_MEMBER_UNCOMPRESSED_BYTES = 32 * 1024 * 1024
 MAX_TOTAL_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
 MAX_COMPRESSION_RATIO = 200.0
@@ -114,10 +115,18 @@ def _safe_relative_path(info: zipfile.ZipInfo) -> Path:
         raise UnsafeArchiveError(f"Entrada absoluta bloqueada: {info.filename!r}")
     if any(part in {"", ".", ".."} for part in member.parts):
         raise UnsafeArchiveError(f"Path traversal bloqueado: {info.filename!r}")
+    directory_depth = len(member.parts) if info.is_dir() else len(member.parts) - 1
+    if directory_depth > MAX_DIRECTORY_DEPTH:
+        raise ArchiveLimitError(
+            f"Uma entrada excede a profundidade máxima {MAX_DIRECTORY_DEPTH}."
+        )
 
     unix_mode = info.external_attr >> 16
     if stat.S_ISLNK(unix_mode):
         raise UnsafeArchiveError(f"Link simbólico bloqueado: {info.filename!r}")
+    file_type = stat.S_IFMT(unix_mode)
+    if file_type and not (stat.S_ISREG(unix_mode) or stat.S_ISDIR(unix_mode)):
+        raise UnsafeArchiveError(f"Arquivo especial bloqueado: {info.filename!r}")
     return Path(*member.parts)
 
 
@@ -177,6 +186,12 @@ def extract_archive_safely(archive_path: Path, destination: Path) -> None:
         members = archive.infolist()
         _validate_resource_limits(members)
         relative_paths = [_safe_relative_path(info) for info in members]
+        normalized_names = [
+            relative_path.as_posix().casefold()
+            for relative_path in relative_paths
+        ]
+        if len(normalized_names) != len(set(normalized_names)):
+            raise UnsafeArchiveError("O ZIP contém entradas duplicadas ou ambíguas.")
         total_written = 0
 
         for info, relative_path in zip(members, relative_paths, strict=True):
@@ -233,6 +248,18 @@ def detect_save_root(extracted_dir: Path) -> Path:
     return shallowest[0]
 
 
+def validate_extracted_scope(extracted_dir: Path, save_root: Path) -> None:
+    """Rejeita arquivos que não pertençam à raiz lógica detectada."""
+    extracted_dir = extracted_dir.resolve()
+    save_root = save_root.resolve()
+    for path in extracted_dir.rglob("*"):
+        if path.is_file() and not path.resolve().is_relative_to(save_root):
+            relative = path.relative_to(extracted_dir).as_posix()
+            raise UnsafeArchiveError(
+                f"Arquivo fora da raiz lógica do save bloqueado: {relative!r}"
+            )
+
+
 @contextmanager
 def extracted_save(archive_path: Path) -> Iterator[tuple[Path, str]]:
     """Disponibiliza uma raiz de save temporária e a remove ao sair do contexto."""
@@ -241,5 +268,6 @@ def extracted_save(archive_path: Path) -> Iterator[tuple[Path, str]]:
         temporary_dir = Path(temporary).resolve()
         extract_archive_safely(archive, temporary_dir)
         root = detect_save_root(temporary_dir)
+        validate_extracted_scope(temporary_dir, root)
         relative_root = root.relative_to(temporary_dir).as_posix()
         yield root, relative_root
