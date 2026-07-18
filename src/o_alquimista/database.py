@@ -32,6 +32,7 @@ from .memory_models import (
     StrategicRecommendation,
 )
 from .models import Milestone, NormalizedSnapshot, Recommendation
+from .provenance import validate_snapshot_provenance
 
 DATABASE_VERSION = 3
 
@@ -892,10 +893,11 @@ class AlquimistaDatabase:
         campaign_identity: CampaignIdentity,
     ) -> PersistedImport:
         """Persiste toda a importação atomicamente e deduplica por SHA-256."""
+        snapshot_data = snapshot.to_dict()
+        validate_snapshot_provenance(snapshot_data)
         self.initialize()
         imported_at = self._now()
         import_id, snapshot_id = self._ids(fingerprint)
-        snapshot_data = snapshot.to_dict()
         with self._connection(immediate=True) as connection:
             existing = self._existing_import(connection, fingerprint.digest)
             if existing is not None:

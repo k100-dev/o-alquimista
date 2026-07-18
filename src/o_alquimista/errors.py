@@ -35,3 +35,11 @@ class CampaignMismatchError(AlquimistaError):
 
 class RecordNotFoundError(AlquimistaError):
     """Uma campanha ou snapshot solicitado não existe."""
+
+
+class UnsafeProvenanceError(AlquimistaError):
+    """Um caminho de proveniência não é lógico, relativo e seguro."""
+
+
+class UnsupportedDatabaseVersionError(AlquimistaError):
+    """O banco foi criado por uma versão mais nova do aplicativo."""
