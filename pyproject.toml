@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "o-alquimista"
+version = "0.2.0"
+description = "Companion estratégico read-only para saves exportados do Schedule I"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+alquimista = "o_alquimista.cli:main"
+schedule-intel = "o_alquimista.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
