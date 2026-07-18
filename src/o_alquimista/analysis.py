@@ -88,6 +88,8 @@ def _entity_map(
     snapshot: dict[str, Any],
     section: str,
 ) -> dict[str, Any] | None:
+    if not _section_is_observed(snapshot, section):
+        return None
     if section == "products":
         products = snapshot.get("products")
         if not isinstance(products, dict) or "discovered" not in products:
@@ -101,7 +103,7 @@ def _entity_map(
         return dict(quantities) if isinstance(quantities, dict) else None
     if section in {"properties", "businesses"}:
         values = snapshot.get(section)
-        if not isinstance(values, list):
+        if not isinstance(values, (list, tuple)):
             return None
         return {
             str(value.get("name")): {
@@ -114,7 +116,7 @@ def _entity_map(
         }
     if section in {"vehicles", "employees"}:
         values = snapshot.get(section)
-        if not isinstance(values, list):
+        if not isinstance(values, (list, tuple)):
             return None
         id_field = "vehicle_id" if section == "vehicles" else "employee_id"
         return {
@@ -132,6 +134,30 @@ def _entity_map(
             if field in progression
         }
     return None
+
+
+def _availability_state(
+    snapshot: dict[str, Any],
+    section: str,
+) -> str | None:
+    availability = snapshot.get("availability")
+    if not isinstance(availability, dict):
+        return None
+    section_availability = availability.get(section)
+    if not isinstance(section_availability, dict):
+        return None
+    state = section_availability.get("state")
+    return str(state) if state is not None else None
+
+
+def _section_is_observed(
+    snapshot: dict[str, Any],
+    section: str,
+) -> bool:
+    state = _availability_state(snapshot, section)
+    if state is not None:
+        return state == "observed"
+    return section in snapshot
 
 
 def _operational_changes(
@@ -290,6 +316,11 @@ def build_timeline_entry(
     employees = snapshot.get("employees")
     vehicles = snapshot.get("vehicles")
     products = snapshot.get("products")
+    availability = (
+        snapshot.get("availability")
+        if isinstance(snapshot.get("availability"), dict)
+        else {}
+    )
     return TimelineEntry(
         snapshot_id=snapshot_id,
         import_id=import_id,
@@ -311,19 +342,45 @@ def build_timeline_entry(
             )
         },
         operational_summary={
-            "properties": len(properties) if isinstance(properties, list) else None,
-            "businesses": len(businesses) if isinstance(businesses, list) else None,
-            "employees": len(employees) if isinstance(employees, list) else None,
-            "vehicles": len(vehicles) if isinstance(vehicles, list) else None,
+            "properties": (
+                len(properties)
+                if _section_is_observed(snapshot, "properties")
+                and isinstance(properties, (list, tuple))
+                else None
+            ),
+            "businesses": (
+                len(businesses)
+                if _section_is_observed(snapshot, "businesses")
+                and isinstance(businesses, (list, tuple))
+                else None
+            ),
+            "employees": (
+                len(employees)
+                if _section_is_observed(snapshot, "employees")
+                and isinstance(employees, (list, tuple))
+                else None
+            ),
+            "vehicles": (
+                len(vehicles)
+                if _section_is_observed(snapshot, "vehicles")
+                and isinstance(vehicles, (list, tuple))
+                else None
+            ),
             "products": (
                 len(products.get("discovered", []))
-                if isinstance(products, dict)
+                if _section_is_observed(snapshot, "products")
+                and isinstance(products, dict)
                 else None
             ),
         },
         progression_summary={
             key: progression.get(key)
             for key in ("rank", "tier", "xp", "total_xp")
+        },
+        availability={
+            str(key): value
+            for key, value in availability.items()
+            if isinstance(value, dict)
         },
         milestones=tuple(item.to_dict() for item in milestones),
         primary_evidence=tuple(

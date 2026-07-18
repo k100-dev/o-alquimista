@@ -26,6 +26,8 @@ from .models import (
     ProductCatalog,
     Progression,
     Property,
+    SectionAvailability,
+    SectionAvailabilityState,
     UnknownField,
     Vehicle,
 )
@@ -96,6 +98,18 @@ def _unknown_fields(
 
 def _origin(file: str, field: str) -> DataOrigin:
     return DataOrigin(file=file, field=field)
+
+
+def _availability(
+    state: SectionAvailabilityState,
+    *source_files: str,
+    explanation: str,
+) -> SectionAvailability:
+    return SectionAvailability(
+        state=state,
+        source_files=tuple(source_files),
+        explanation=explanation,
+    )
 
 
 def _parse_items(
@@ -221,13 +235,96 @@ def _property_summary(save_root: Path, path: Path) -> Property:
     )
 
 
-def _parse_npcs(save_root: Path) -> NpcCollection:
+def _parse_property_section(
+    save_root: Path,
+    directory_name: str,
+) -> tuple[tuple[Property, ...], SectionAvailability, set[Path]]:
+    directory = save_root / directory_name
+    if not directory.is_dir():
+        return (
+            (),
+            _availability(
+                "missing",
+                directory_name,
+                explanation=f"{directory_name}/ não foi encontrado no export.",
+            ),
+            set(),
+        )
+    paths = set(directory.glob("*.json"))
+    parsed: list[Property] = []
+    invalid_files: list[str] = []
+    for path in sorted(paths):
+        try:
+            parsed.append(_property_summary(save_root, path))
+        except SaveDataError:
+            invalid_files.append(path.relative_to(save_root).as_posix())
+    if invalid_files:
+        return (
+            tuple(parsed),
+            _availability(
+                "invalid",
+                *sorted(invalid_files),
+                explanation=(
+                    f"{directory_name}/ contém arquivo(s) que não puderam ser "
+                    "normalizados."
+                ),
+            ),
+            paths,
+        )
+    return (
+        tuple(parsed),
+        _availability(
+            "observed",
+            directory_name,
+            explanation=(
+                f"Coleção {directory_name} observada; diretório vazio é "
+                "uma observação válida."
+            ),
+        ),
+        paths,
+    )
+
+
+def _parse_npcs(
+    save_root: Path,
+) -> tuple[NpcCollection, SectionAvailability]:
     path = save_root / "NPCs.json"
     if not path.is_file():
-        return NpcCollection(total=0, unlocked_relationships=0, entries=())
+        return (
+            NpcCollection(total=0, unlocked_relationships=0, entries=()),
+            _availability(
+                "missing",
+                "NPCs.json",
+                explanation="NPCs.json não foi encontrado no export.",
+            ),
+        )
     relative = "NPCs.json"
-    data = _as_object(decode_embedded_json(load_json(path)), path)
-    raw_npcs = data.get("NPCs") if isinstance(data.get("NPCs"), list) else []
+    try:
+        data = _as_object(decode_embedded_json(load_json(path)), path)
+    except SaveDataError as exc:
+        return (
+            NpcCollection(total=0, unlocked_relationships=0, entries=()),
+            _availability(
+                "invalid",
+                relative,
+                explanation=f"NPCs.json não pôde ser normalizado: {exc}",
+            ),
+        )
+    if not isinstance(data.get("NPCs"), list):
+        return (
+            NpcCollection(
+                total=0,
+                unlocked_relationships=0,
+                entries=(),
+                unknown=_unknown_fields(data, set(), relative),
+            ),
+            _availability(
+                "invalid",
+                relative,
+                explanation="NPCs.json não contém a coleção NPCs esperada.",
+            ),
+        )
+    raw_npcs = data["NPCs"]
     entries: list[Npc] = []
     unlocked_count = 0
     for index, raw in enumerate(raw_npcs):
@@ -259,36 +356,75 @@ def _parse_npcs(save_root: Path) -> NpcCollection:
                 unknown=unknown,
             )
         )
-    return NpcCollection(
-        total=len(raw_npcs),
-        unlocked_relationships=unlocked_count,
-        entries=tuple(entries),
-        origins={
-            "total": _origin(relative, "NPCs"),
-            "unlocked_relationships": _origin(
-                relative, "NPCs[].AdditionalDatas[Relationship].Contents.Unlocked"
-            ),
-        },
-        unknown=_unknown_fields(data, {"NPCs"}, relative),
+    return (
+        NpcCollection(
+            total=len(raw_npcs),
+            unlocked_relationships=unlocked_count,
+            entries=tuple(entries),
+            origins={
+                "total": _origin(relative, "NPCs"),
+                "unlocked_relationships": _origin(
+                    relative,
+                    "NPCs[].AdditionalDatas[Relationship].Contents.Unlocked",
+                ),
+            },
+            unknown=_unknown_fields(data, {"NPCs"}, relative),
+        ),
+        _availability(
+            "observed",
+            relative,
+            explanation="Coleção NPCs observada em NPCs.json.",
+        ),
     )
 
 
 def _parse_vehicles(
     save_root: Path,
-) -> tuple[tuple[Vehicle, ...], tuple[UnknownField, ...]]:
+) -> tuple[
+    tuple[Vehicle, ...],
+    tuple[UnknownField, ...],
+    SectionAvailability,
+]:
     path = save_root / "Vehicles.json"
     if not path.is_file():
-        return (), ()
+        return (
+            (),
+            (),
+            _availability(
+                "missing",
+                "Vehicles.json",
+                explanation="Vehicles.json não foi encontrado no export.",
+            ),
+        )
     relative = "Vehicles.json"
-    data = decode_embedded_json(load_json(path))
+    try:
+        data = decode_embedded_json(load_json(path))
+    except SaveDataError as exc:
+        return (
+            (),
+            (),
+            _availability(
+                "invalid",
+                relative,
+                explanation=f"Vehicles.json não pôde ser normalizado: {exc}",
+            ),
+        )
     if isinstance(data, dict):
-        raw_vehicles = data.get("Vehicles", [])
+        raw_vehicles = data.get("Vehicles")
         root_unknown = _unknown_fields(data, {"Vehicles"}, relative)
     else:
         raw_vehicles = data
         root_unknown = ()
     if not isinstance(raw_vehicles, list):
-        return (), root_unknown
+        return (
+            (),
+            root_unknown,
+            _availability(
+                "invalid",
+                relative,
+                explanation="Vehicles.json não contém uma coleção de veículos.",
+            ),
+        )
     return (
         tuple(
             Vehicle(
@@ -308,6 +444,11 @@ def _parse_vehicles(
             for index, raw in enumerate(raw_vehicles)
         ),
         root_unknown,
+        _availability(
+            "observed",
+            relative,
+            explanation="Coleção de veículos observada em Vehicles.json.",
+        ),
     )
 
 
@@ -364,19 +505,40 @@ def read_save_model(
 
     all_items: list[InventoryItem] = []
     players: list[dict[str, Any]] = []
-    inventory_scope_observed = False
+    inventory_source_count = 0
+    inventory_invalid = False
     players_dir = save_root / "Players"
+    players_availability = _availability(
+        "missing",
+        "Players",
+        explanation="Players/ não foi encontrado no export.",
+    )
     if players_dir.is_dir():
+        players_availability = _availability(
+            "observed",
+            "Players",
+            explanation="Diretório Players/ observado no export.",
+        )
         for player_dir in sorted(path for path in players_dir.iterdir() if path.is_dir()):
             inventory_path = player_dir / "Inventory.json"
             if not inventory_path.is_file():
                 continue
-            inventory_scope_observed = True
+            inventory_source_count += 1
             relative = inventory_path.relative_to(save_root).as_posix()
-            inventory_data = _as_object(load_json(inventory_path), inventory_path)
-            items = _parse_items(inventory_data.get("Items"), relative, "Items")
-            all_items.extend(items)
             handled_files.add(inventory_path)
+            try:
+                inventory_data = _as_object(
+                    load_json(inventory_path),
+                    inventory_path,
+                )
+            except SaveDataError:
+                inventory_invalid = True
+                continue
+            if not isinstance(inventory_data.get("Items"), list):
+                inventory_invalid = True
+                continue
+            items = _parse_items(inventory_data["Items"], relative, "Items")
+            all_items.extend(items)
             players.append(
                 {
                     "player": player_dir.name,
@@ -386,41 +548,85 @@ def read_save_model(
                 }
             )
 
-    world_entity_count = 0
+    world_entity_count: int | None = None
     world_path = save_root / "WorldStorageEntities.json"
+    world_availability = _availability(
+        "missing",
+        "WorldStorageEntities.json",
+        explanation="WorldStorageEntities.json não foi encontrado no export.",
+    )
     if world_path.is_file():
-        inventory_scope_observed = True
+        inventory_source_count += 1
         relative = "WorldStorageEntities.json"
-        world = _as_object(decode_embedded_json(load_json(world_path)), world_path)
-        entities = world.get("Entities") if isinstance(world.get("Entities"), list) else []
-        world_entity_count = len(entities)
-        for index, entity in enumerate(entities):
-            contents = entity.get("Contents") if isinstance(entity, dict) else None
-            if isinstance(contents, dict):
-                all_items.extend(
-                    _parse_items(
-                        contents.get("Items"),
-                        relative,
-                        f"Entities[{index}].Contents.Items",
-                    )
+        handled_files.add(world_path)
+        try:
+            world = _as_object(
+                decode_embedded_json(load_json(world_path)),
+                world_path,
+            )
+        except SaveDataError as exc:
+            inventory_invalid = True
+            world_availability = _availability(
+                "invalid",
+                relative,
+                explanation=(
+                    "WorldStorageEntities.json não pôde ser normalizado: "
+                    f"{exc}"
+                ),
+            )
+        else:
+            entities = world.get("Entities")
+            if not isinstance(entities, list):
+                inventory_invalid = True
+                world_availability = _availability(
+                    "invalid",
+                    relative,
+                    explanation=(
+                        "WorldStorageEntities.json não contém a coleção Entities."
+                    ),
                 )
+            else:
+                world_entity_count = len(entities)
+                world_availability = _availability(
+                    "observed",
+                    relative,
+                    explanation="Coleção de armazenamento mundial observada.",
+                )
+                for index, entity in enumerate(entities):
+                    contents = (
+                        entity.get("Contents")
+                        if isinstance(entity, dict)
+                        else None
+                    )
+                    if isinstance(contents, dict):
+                        items = contents.get("Items")
+                        if isinstance(items, list):
+                            all_items.extend(
+                                _parse_items(
+                                    items,
+                                    relative,
+                                    f"Entities[{index}].Contents.Items",
+                                )
+                            )
 
-    properties = tuple(
-        _property_summary(save_root, path)
-        for path in sorted((save_root / "Properties").glob("*.json"))
-    ) if (save_root / "Properties").is_dir() else ()
-    businesses = tuple(
-        _property_summary(save_root, path)
-        for path in sorted((save_root / "Businesses").glob("*.json"))
-    ) if (save_root / "Businesses").is_dir() else ()
-    handled_files.update(save_root / "Properties" / f"{prop.name}.json" for prop in properties)
-    handled_files.update(save_root / "Businesses" / f"{prop.name}.json" for prop in businesses)
+    properties, properties_availability, property_paths = _parse_property_section(
+        save_root,
+        "Properties",
+    )
+    businesses, businesses_availability, business_paths = _parse_property_section(
+        save_root,
+        "Businesses",
+    )
+    handled_files.update(property_paths)
+    handled_files.update(business_paths)
 
-    npcs = _parse_npcs(save_root)
+    npcs, npcs_availability = _parse_npcs(save_root)
     npc_path = save_root / "NPCs.json"
     if npc_path.is_file():
         handled_files.add(npc_path)
-    vehicles, vehicle_root_unknown = _parse_vehicles(save_root)
+    vehicles, vehicle_root_unknown, vehicles_availability = _parse_vehicles(
+        save_root
+    )
     vehicle_path = save_root / "Vehicles.json"
     if vehicle_path.is_file():
         handled_files.add(vehicle_path)
@@ -447,6 +653,31 @@ def read_save_model(
         for product_id in product_ids
     )
 
+    if inventory_invalid:
+        inventory_availability = _availability(
+            "invalid",
+            "Players/*/Inventory.json",
+            "WorldStorageEntities.json",
+            explanation=(
+                "Ao menos uma fonte de inventário estava ausente de sua coleção "
+                "esperada ou não pôde ser normalizada."
+            ),
+        )
+    elif inventory_source_count:
+        inventory_availability = _availability(
+            "observed",
+            "Players/*/Inventory.json",
+            "WorldStorageEntities.json",
+            explanation="Ao menos uma fonte de inventário foi observada.",
+        )
+    else:
+        inventory_availability = _availability(
+            "missing",
+            "Players/*/Inventory.json",
+            "WorldStorageEntities.json",
+            explanation="Nenhuma fonte de inventário foi encontrada no export.",
+        )
+
     inventory = _summarize_items(all_items)
     market_value = (
         round(
@@ -456,7 +687,7 @@ def read_save_model(
             ),
             2,
         )
-        if inventory_scope_observed
+        if inventory_availability.state == "observed"
         else None
     )
     employees = tuple(
@@ -464,6 +695,37 @@ def read_save_model(
         for prop in (*properties, *businesses)
         for employee in prop.employees
     )
+    property_states = {
+        properties_availability.state,
+        businesses_availability.state,
+    }
+    if "invalid" in property_states:
+        employees_availability = _availability(
+            "invalid",
+            "Properties",
+            "Businesses",
+            explanation=(
+                "Funcionários não são conclusivos porque uma fonte de "
+                "propriedades ou negócios é inválida."
+            ),
+        )
+    elif property_states == {"observed"}:
+        employees_availability = _availability(
+            "observed",
+            "Properties",
+            "Businesses",
+            explanation="Coleções que contêm funcionários foram observadas.",
+        )
+    else:
+        employees_availability = _availability(
+            "missing",
+            "Properties",
+            "Businesses",
+            explanation=(
+                "Funcionários não são conclusivos porque uma fonte opcional "
+                "não foi observada."
+            ),
+        )
 
     archive = source_archive.expanduser().resolve() if source_archive else None
     if archive is not None and archive_fingerprint is None:
@@ -501,7 +763,11 @@ def read_save_model(
     )
 
     online_balance = _optional_number(money.get("OnlineBalance"))
-    loose_cash = inventory.cash if inventory_scope_observed else None
+    loose_cash = (
+        inventory.cash
+        if inventory_availability.state == "observed"
+        else None
+    )
     return NormalizedSnapshot(
         metadata=metadata,
         finance=Finance(
@@ -628,6 +894,36 @@ def read_save_model(
         npcs=npcs,
         employees=employees,
         vehicles=vehicles,
+        availability={
+            "finance": _availability(
+                "observed",
+                "Money.json",
+                explanation="Money.json essencial foi observado.",
+            ),
+            "time": _availability(
+                "observed",
+                "Time.json",
+                explanation="Time.json essencial foi observado.",
+            ),
+            "progression": _availability(
+                "observed",
+                "Rank.json",
+                explanation="Rank.json essencial foi observado.",
+            ),
+            "products": _availability(
+                "observed",
+                "Products.json",
+                explanation="Products.json essencial foi observado.",
+            ),
+            "players": players_availability,
+            "inventory": inventory_availability,
+            "world_storage": world_availability,
+            "properties": properties_availability,
+            "businesses": businesses_availability,
+            "npcs": npcs_availability,
+            "employees": employees_availability,
+            "vehicles": vehicles_availability,
+        },
         unknown=(
             *vehicle_root_unknown,
             *_collect_unmapped_files(save_root, handled_files),

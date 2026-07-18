@@ -62,6 +62,13 @@ def build_timeline_markdown(
     for entry in entries:
         moment = entry.get("observable_game_moment", {})
         finance = entry.get("financial_summary", {})
+        unavailable = [
+            f"{section}={value.get('state')}"
+            for section, value in sorted(
+                (entry.get("availability") or {}).items()
+            )
+            if isinstance(value, dict) and value.get("state") != "observed"
+        ]
         lines += [
             f"### {entry.get('chronological_order')}. `{entry.get('snapshot_id')}`",
             "",
@@ -69,6 +76,10 @@ def build_timeline_markdown(
             f"- Tempo de jogo: {moment.get('playtime_seconds', 'indisponível')}",
             f"- Patrimônio: {finance.get('networth', 'indisponível')}",
             f"- Marcos: {len(entry.get('milestones', []))}",
+            (
+                "- Seções indisponíveis: "
+                f"{', '.join(unavailable) if unavailable else 'nenhuma'}"
+            ),
             "",
         ]
     lines += [

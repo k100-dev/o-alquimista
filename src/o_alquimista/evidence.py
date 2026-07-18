@@ -205,4 +205,22 @@ def snapshot_evidence(snapshot: dict[str, Any]) -> tuple[Evidence, ...]:
                 explanation=explanation,
             )
         )
+    availability = snapshot.get("availability")
+    if isinstance(availability, dict):
+        for section, value in sorted(availability.items()):
+            if not isinstance(value, dict):
+                continue
+            state = value.get("state")
+            if state in {None, "observed"}:
+                continue
+            evidence.append(
+                unavailable_evidence(
+                    field_name=str(section),
+                    explanation=(
+                        f"Seção {section} está {state}: "
+                        f"{value.get('explanation', 'sem detalhe adicional')}"
+                    ),
+                    related_entity=str(section),
+                )
+            )
     return tuple(sorted(evidence, key=lambda item: item.evidence_id))

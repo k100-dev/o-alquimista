@@ -8,6 +8,12 @@ from typing import Any, Literal, TypeAlias, Union
 JsonValue: TypeAlias = Union[
     None, bool, int, float, str, list["JsonValue"], dict[str, "JsonValue"]
 ]
+SectionAvailabilityState = Literal[
+    "observed",
+    "missing",
+    "invalid",
+    "unsupported",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +31,13 @@ class UnknownField:
     name: str
     raw: JsonValue
     origin: DataOrigin
+
+
+@dataclass(frozen=True, slots=True)
+class SectionAvailability:
+    state: SectionAvailabilityState
+    source_files: tuple[str, ...]
+    explanation: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,12 +221,13 @@ class NormalizedSnapshot:
     products: ProductCatalog
     inventory: Inventory
     players: tuple[dict[str, JsonValue], ...]
-    world_storage_entity_count: int
+    world_storage_entity_count: int | None
     properties: tuple[Property, ...]
     businesses: tuple[Property, ...]
     npcs: NpcCollection
     employees: tuple[Employee, ...]
     vehicles: tuple[Vehicle, ...]
+    availability: dict[str, SectionAvailability]
     unknown: tuple[UnknownField, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:

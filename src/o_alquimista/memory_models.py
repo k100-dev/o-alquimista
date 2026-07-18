@@ -100,6 +100,7 @@ class TimelineEntry:
     financial_summary: dict[str, Any]
     operational_summary: dict[str, Any]
     progression_summary: dict[str, Any]
+    availability: dict[str, dict[str, Any]]
     milestones: tuple[dict[str, Any], ...]
     primary_evidence: tuple[dict[str, Any], ...]
 

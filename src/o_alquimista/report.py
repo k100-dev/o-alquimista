@@ -88,4 +88,18 @@ def build_markdown(snapshot: dict[str, Any]) -> str:
         "- Inferências econômicas exigem evidência adicional; este relatório "
         "não atribui significado a campos desconhecidos."
     )
+    availability = snapshot.get("availability")
+    if isinstance(availability, dict):
+        unavailable = [
+            (section, value)
+            for section, value in sorted(availability.items())
+            if isinstance(value, dict) and value.get("state") != "observed"
+        ]
+        if unavailable:
+            lines += ["", "## Disponibilidade", ""]
+            lines.extend(
+                f"- `{section}`: **{value.get('state')}** — "
+                f"{value.get('explanation')}"
+                for section, value in unavailable
+            )
     return "\n".join(lines) + "\n"
