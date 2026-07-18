@@ -44,6 +44,7 @@ from o_alquimista.identity import (
     fingerprint_archive,
     resolve_campaign_identity,
 )
+from o_alquimista.memory_reports import build_analysis_markdown
 from o_alquimista.parser import snapshot_and_fingerprint_from_zip, snapshot_from_zip
 from o_alquimista.report import build_markdown
 from schedule_intelligence.cli import main as legacy_main
@@ -129,6 +130,12 @@ def minimal_snapshot(
     }
 
 
+def add_empty_directories(archive: Path, *directories: str) -> None:
+    with zipfile.ZipFile(archive, mode="a") as zip_file:
+        for directory in directories:
+            zip_file.writestr(f"{directory.rstrip('/')}/", b"")
+
+
 class ArchiveIdentityTests(unittest.TestCase):
     def test_sha256_is_deterministic_and_lowercase(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -189,6 +196,7 @@ class ArchiveIdentityTests(unittest.TestCase):
             snapshot, fingerprint = snapshot_and_fingerprint_from_zip(archive)
             identity = resolve_campaign_identity(snapshot, fingerprint)
             self.assertEqual(identity.strategy, "native_campaign_identifier")
+            self.assertEqual(identity.resolution_state, "resolved")
             self.assertEqual(identity.confidence, "high")
             serialized = json.dumps(identity.to_dict())
             self.assertNotIn("synthetic-native-id", serialized)
@@ -205,21 +213,42 @@ class ArchiveIdentityTests(unittest.TestCase):
             snapshot, fingerprint = snapshot_and_fingerprint_from_zip(archive)
             identity = resolve_campaign_identity(snapshot, fingerprint)
 
-            self.assertEqual(identity.strategy, "stable_internal_identifiers")
-            self.assertEqual(identity.confidence, "medium")
+            self.assertEqual(identity.strategy, "weak_signal_candidate")
+            self.assertEqual(identity.resolution_state, "candidate")
+            self.assertEqual(identity.confidence, "low")
 
-    def test_campaign_identity_is_stable_across_progress(self) -> None:
+    def test_weak_signals_do_not_consolidate_distinct_exports(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            first = Path(temporary) / "early.zip"
-            second = Path(temporary) / "late.zip"
+            temporary_path = Path(temporary)
+            first = temporary_path / "early.zip"
+            second = temporary_path / "late.zip"
             create_save_zip(first, files=campaign_files(day=1, balance=20))
             create_save_zip(second, files=campaign_files(day=9, balance=900))
             snapshot_a, fingerprint_a = snapshot_and_fingerprint_from_zip(first)
             snapshot_b, fingerprint_b = snapshot_and_fingerprint_from_zip(second)
             identity_a = resolve_campaign_identity(snapshot_a, fingerprint_a)
             identity_b = resolve_campaign_identity(snapshot_b, fingerprint_b)
-            self.assertEqual(identity_a.campaign_id, identity_b.campaign_id)
-            self.assertEqual(identity_a.confidence, "medium")
+            self.assertNotEqual(identity_a.campaign_id, identity_b.campaign_id)
+            self.assertEqual(identity_a.resolution_state, "candidate")
+            self.assertEqual(identity_b.resolution_state, "candidate")
+            database = AlquimistaDatabase(temporary_path / "memory.sqlite3")
+            first_record = database.persist_import(
+                snapshot_a,
+                fingerprint_a,
+                identity_a,
+            )
+            second_record = database.persist_import(
+                snapshot_b,
+                fingerprint_b,
+                identity_b,
+            )
+            associations = database.campaign_associations(
+                second_record.campaign_id
+            )
+            self.assertEqual(
+                {item["candidate_campaign_id"] for item in associations},
+                {first_record.campaign_id},
+            )
 
     def test_different_internal_identity_creates_different_campaign(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -242,19 +271,227 @@ class ArchiveIdentityTests(unittest.TestCase):
 
     def test_campaign_fallback_is_explicit_and_low_confidence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            archive = Path(temporary) / "fallback.zip"
-            files = campaign_files()
-            files.pop("Game.json")
-            files.pop("Players/synthetic-player/Inventory.json")
-            create_save_zip(archive, files=files)
-            snapshot, fingerprint = snapshot_and_fingerprint_from_zip(archive)
-            identity = resolve_campaign_identity(snapshot, fingerprint)
-            self.assertEqual(identity.strategy, "archive_scoped_fallback")
-            self.assertEqual(identity.confidence, "low")
-            self.assertEqual(identity.evidence[0].category, "unavailable")
+            identities = []
+            for day in (1, 2):
+                archive = Path(temporary) / f"fallback-{day}.zip"
+                files = campaign_files(day=day)
+                files.pop("Game.json")
+                files.pop("Players/synthetic-player/Inventory.json")
+                create_save_zip(archive, files=files)
+                snapshot, fingerprint = snapshot_and_fingerprint_from_zip(archive)
+                identity = resolve_campaign_identity(snapshot, fingerprint)
+                identities.append((identity, fingerprint))
+            self.assertNotEqual(
+                identities[0][0].campaign_id,
+                identities[1][0].campaign_id,
+            )
+            for identity, fingerprint in identities:
+                self.assertEqual(identity.resolution_state, "unresolved")
+                self.assertEqual(
+                    identity.strategy,
+                    "unresolved_without_stable_identity",
+                )
+                self.assertEqual(identity.confidence, "unavailable")
+                self.assertEqual(identity.evidence[0].category, "unavailable")
+                self.assertNotIn(
+                    fingerprint.digest,
+                    json.dumps(identity.to_dict()),
+                )
+
+    def test_organisation_change_creates_ambiguous_candidate_link(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_path = Path(temporary)
+            database = AlquimistaDatabase(temporary_path / "memory.sqlite3")
+            records = []
+            for organisation in ("Organisation A", "Organisation B"):
+                archive = temporary_path / f"{organisation[-1]}.zip"
+                create_save_zip(
+                    archive,
+                    files=campaign_files(organisation=organisation),
+                )
+                snapshot, fingerprint = snapshot_and_fingerprint_from_zip(archive)
+                identity = resolve_campaign_identity(snapshot, fingerprint)
+                records.append(
+                    database.persist_import(snapshot, fingerprint, identity)
+                )
+            self.assertNotEqual(records[0].campaign_id, records[1].campaign_id)
+            associations = database.campaign_associations(
+                records[1].campaign_id
+            )
+            self.assertEqual(
+                associations[0]["candidate_campaign_id"],
+                records[0].campaign_id,
+            )
+            self.assertEqual(
+                associations[0]["association_state"],
+                "candidate",
+            )
+
+    def test_player_entry_generates_ambiguous_association(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_path = Path(temporary)
+            database = AlquimistaDatabase(temporary_path / "memory.sqlite3")
+            first_files = campaign_files(
+                organisation="Organisation A",
+                player="player-one",
+            )
+            second_files = campaign_files(
+                organisation="Organisation B",
+                player="player-one",
+                day=2,
+            )
+            second_files["Players/player-two/Inventory.json"] = {
+                "Items": [],
+            }
+            records = []
+            for name, files in (
+                ("first.zip", first_files),
+                ("second.zip", second_files),
+            ):
+                archive = temporary_path / name
+                create_save_zip(archive, files=files)
+                snapshot, fingerprint = snapshot_and_fingerprint_from_zip(archive)
+                identity = resolve_campaign_identity(snapshot, fingerprint)
+                records.append(
+                    database.persist_import(snapshot, fingerprint, identity)
+                )
+            self.assertNotEqual(records[0].campaign_id, records[1].campaign_id)
+            association = database.campaign_associations(
+                records[1].campaign_id
+            )[0]
+            self.assertEqual(
+                association["candidate_campaign_id"],
+                records[0].campaign_id,
+            )
+            self.assertIn(
+                "player",
+                {
+                    signal["kind"]
+                    for signal in association["evidence"]["shared_signals"]
+                },
+            )
 
 
 class EvidenceAndAnalysisTests(unittest.TestCase):
+    def test_present_empty_vehicle_collection_differs_from_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_path = Path(temporary)
+            observed_archive = temporary_path / "observed.zip"
+            missing_archive = temporary_path / "missing.zip"
+            observed_files = campaign_files()
+            observed_files["Vehicles.json"] = {"Vehicles": []}
+            missing_files = campaign_files()
+            missing_files.pop("Vehicles.json")
+            create_save_zip(observed_archive, files=observed_files)
+            create_save_zip(missing_archive, files=missing_files)
+
+            observed = snapshot_from_zip(observed_archive).to_dict()
+            missing = snapshot_from_zip(missing_archive).to_dict()
+
+            self.assertEqual(
+                observed["availability"]["vehicles"]["state"],
+                "observed",
+            )
+            self.assertEqual(observed["vehicles"], ())
+            self.assertEqual(
+                missing["availability"]["vehicles"]["state"],
+                "missing",
+            )
+
+    def test_missing_optional_collections_compare_as_unknown(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_path = Path(temporary)
+            observed_archive = temporary_path / "observed.zip"
+            missing_archive = temporary_path / "missing.zip"
+            observed_files = campaign_files()
+            observed_files["Businesses/sample-business.json"] = {
+                "PropertyCode": "sample-business",
+                "IsOwned": False,
+                "Employees": [],
+                "Objects": [],
+            }
+            missing_files = campaign_files(day=2)
+            missing_files.pop("Vehicles.json")
+            missing_files.pop("Properties/sample-property.json")
+            missing_files.pop("Players/synthetic-player/Inventory.json")
+            create_save_zip(observed_archive, files=observed_files)
+            create_save_zip(missing_archive, files=missing_files)
+            before = json.loads(
+                json.dumps(snapshot_from_zip(observed_archive).to_dict())
+            )
+            after = json.loads(
+                json.dumps(snapshot_from_zip(missing_archive).to_dict())
+            )
+
+            comparison = compare_snapshots(
+                before,
+                after,
+                previous_snapshot_id="before",
+                current_snapshot_id="after",
+                previous_campaign_id="campaign",
+                current_campaign_id="campaign",
+            )
+
+            for section in (
+                "vehicles",
+                "properties",
+                "employees",
+                "inventory",
+            ):
+                with self.subTest(section=section):
+                    self.assertEqual(
+                        comparison.operational_changes[section][0].status,
+                        "unknown",
+                    )
+                    self.assertNotIn(
+                        "removed",
+                        {
+                            change.status
+                            for change in comparison.operational_changes[section]
+                        },
+                    )
+
+    def test_empty_properties_employees_and_inventory_are_observed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "empty-sections.zip"
+            files = campaign_files()
+            files.pop("Properties/sample-property.json")
+            files["Players/synthetic-player/Inventory.json"] = {"Items": []}
+            create_save_zip(archive, files=files)
+            add_empty_directories(archive, "Properties", "Businesses")
+
+            snapshot = snapshot_from_zip(archive).to_dict()
+
+            self.assertEqual(
+                snapshot["availability"]["properties"]["state"],
+                "observed",
+            )
+            self.assertEqual(
+                snapshot["availability"]["employees"]["state"],
+                "observed",
+            )
+            self.assertEqual(
+                snapshot["availability"]["inventory"]["state"],
+                "observed",
+            )
+            self.assertEqual(snapshot["properties"], ())
+            self.assertEqual(snapshot["employees"], ())
+            self.assertEqual(snapshot["inventory"]["quantities"], {})
+
+    def test_invalid_optional_collection_is_not_observed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "invalid-vehicles.zip"
+            files = campaign_files()
+            files["Vehicles.json"] = {"Vehicles": "invalid"}
+            create_save_zip(archive, files=files)
+
+            snapshot = snapshot_from_zip(archive).to_dict()
+
+            self.assertEqual(
+                snapshot["availability"]["vehicles"]["state"],
+                "invalid",
+            )
+
     def test_missing_financial_fields_remain_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             archive = Path(temporary) / "missing-finance.zip"
@@ -441,6 +678,53 @@ class EvidenceAndAnalysisTests(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)))
         self.assertIn("first_property", {item.milestone_type for item in first})
 
+    def test_first_property_uses_full_history(self) -> None:
+        history = [
+            minimal_snapshot(property_count=0),
+            minimal_snapshot(property_count=1),
+            minimal_snapshot(property_count=0),
+        ]
+        current = minimal_snapshot(property_count=1)
+
+        milestones = detect_milestones(
+            history,
+            current,
+            campaign_id="campaign",
+            current_snapshot_id="snapshot-4",
+            previous_snapshot_id="snapshot-3",
+        )
+
+        self.assertNotIn(
+            "first_property",
+            {item.milestone_type for item in milestones},
+        )
+
+    def test_missing_section_does_not_recreate_first_property(self) -> None:
+        observed_zero = minimal_snapshot(property_count=0)
+        observed_one = minimal_snapshot(property_count=1)
+        missing = minimal_snapshot(property_count=0)
+        missing["availability"] = {
+            "properties": {
+                "state": "missing",
+                "source_files": ["Properties"],
+                "explanation": "synthetic missing section",
+            }
+        }
+        current = minimal_snapshot(property_count=1)
+
+        milestones = detect_milestones(
+            [observed_zero, observed_one, missing],
+            current,
+            campaign_id="campaign",
+            current_snapshot_id="snapshot-4",
+            previous_snapshot_id="snapshot-3",
+        )
+
+        self.assertNotIn(
+            "first_property",
+            {item.milestone_type for item in milestones},
+        )
+
     def test_recommendation_has_evidence_and_missing_information(self) -> None:
         snapshot = minimal_snapshot(money=20, property_count=1, employee_count=0)
         recommendations = generate_recommendations(
@@ -516,8 +800,22 @@ class PersistenceAndCliTests(unittest.TestCase):
             late = temporary_path / "late.zip"
             early = temporary_path / "early.zip"
             database = AlquimistaDatabase(temporary_path / "memory.sqlite3")
-            create_save_zip(late, files=campaign_files(day=10, balance=500))
-            create_save_zip(early, files=campaign_files(day=2, balance=100))
+            create_save_zip(
+                late,
+                files=campaign_files(
+                    day=10,
+                    balance=500,
+                    native_campaign_id="timeline-campaign",
+                ),
+            )
+            create_save_zip(
+                early,
+                files=campaign_files(
+                    day=2,
+                    balance=100,
+                    native_campaign_id="timeline-campaign",
+                ),
+            )
             late_record = self._import(database, late)
             early_record = self._import(database, early)
             self.assertEqual(late_record.campaign_id, early_record.campaign_id)
@@ -544,14 +842,83 @@ class PersistenceAndCliTests(unittest.TestCase):
                 early_record.snapshot_id,
             )
 
+    def test_retroactive_import_relocates_persisted_first_milestone(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_path = Path(temporary)
+            database = AlquimistaDatabase(temporary_path / "memory.sqlite3")
+            late_archive = temporary_path / "late.zip"
+            early_archive = temporary_path / "early.zip"
+            create_save_zip(
+                late_archive,
+                files=campaign_files(
+                    day=10,
+                    native_campaign_id="retroactive-campaign",
+                ),
+            )
+            create_save_zip(
+                early_archive,
+                files=campaign_files(
+                    day=2,
+                    native_campaign_id="retroactive-campaign",
+                ),
+            )
+
+            late = self._import(database, late_archive)
+            database.analyze_and_persist(late.campaign_id)
+            initial = {
+                item.milestone_type: item
+                for item in database.detected_milestones(late.campaign_id)
+            }
+            self.assertEqual(
+                initial["first_property"].first_seen_snapshot_id,
+                late.snapshot_id,
+            )
+
+            early = self._import(database, early_archive)
+            analysis = database.analyze_and_persist(early.campaign_id)
+            persisted = {
+                item.milestone_type: item
+                for item in database.detected_milestones(early.campaign_id)
+            }
+            timeline = database.campaign_history(early.campaign_id)
+            timeline_first = [
+                entry["snapshot_id"]
+                for entry in timeline
+                if any(
+                    milestone["milestone_type"] == "first_property"
+                    for milestone in entry["milestones"]
+                )
+            ]
+            report = build_analysis_markdown(analysis)
+
+            self.assertEqual(
+                persisted["first_property"].first_seen_snapshot_id,
+                early.snapshot_id,
+            )
+            self.assertEqual(timeline_first, [early.snapshot_id])
+            self.assertIn(early.snapshot_id, report)
+            self.assertNotIn(late.snapshot_id, report.split("## Marcos", 1)[1])
+
     def test_same_evidence_is_linked_to_each_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             temporary_path = Path(temporary)
             database_path = temporary_path / "memory.sqlite3"
             first_archive = temporary_path / "first.zip"
             second_archive = temporary_path / "second.zip"
-            create_save_zip(first_archive, files=campaign_files(day=1))
-            create_save_zip(second_archive, files=campaign_files(day=2))
+            create_save_zip(
+                first_archive,
+                files=campaign_files(
+                    day=1,
+                    native_campaign_id="evidence-campaign",
+                ),
+            )
+            create_save_zip(
+                second_archive,
+                files=campaign_files(
+                    day=2,
+                    native_campaign_id="evidence-campaign",
+                ),
+            )
             database = AlquimistaDatabase(database_path)
             first = self._import(database, first_archive)
             second = self._import(database, second_archive)
@@ -593,6 +960,9 @@ class PersistenceAndCliTests(unittest.TestCase):
                         "timeline_entries",
                         "evidence",
                         "snapshot_relationships",
+                        "campaign_identity_signals",
+                        "campaign_associations",
+                        "campaign_milestones",
                     }.issubset(tables)
                 )
             with database._connection() as connection:
@@ -683,7 +1053,8 @@ class PersistenceAndCliTests(unittest.TestCase):
                     """
                 )
                 connection.commit()
-            AlquimistaDatabase(database_path).initialize()
+            database = AlquimistaDatabase(database_path)
+            database.initialize()
             with closing(sqlite3.connect(database_path)) as connection:
                 fingerprint_id = connection.execute(
                     "SELECT fingerprint_id FROM imports WHERE id='legacy-import'"
@@ -695,6 +1066,135 @@ class PersistenceAndCliTests(unittest.TestCase):
                     ).fetchone()[0],
                     1,
                 )
+                first_dump = "\n".join(connection.iterdump())
+            database.initialize()
+            with closing(sqlite3.connect(database_path)) as connection:
+                second_dump = "\n".join(connection.iterdump())
+                self.assertEqual(
+                    connection.execute("PRAGMA user_version").fetchone()[0],
+                    DATABASE_VERSION,
+                )
+            self.assertEqual(first_dump, second_dump)
+
+    def test_migration_from_milestone2_preserves_snapshots_and_is_idempotent(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            database_path = Path(temporary) / "milestone2.sqlite3"
+            organisation_digest = "b" * 64
+            player_digest = "c" * 64
+            legacy_evidence = json.dumps(
+                [
+                    {
+                        "normalized_value": {
+                            "organisation": organisation_digest,
+                            "players": [player_digest],
+                        }
+                    }
+                ],
+                sort_keys=True,
+            )
+            with closing(sqlite3.connect(database_path)) as connection:
+                connection.executescript(BASE_SCHEMA)
+                connection.execute(
+                    """
+                    CREATE TABLE archive_fingerprints (
+                        id TEXT PRIMARY KEY,
+                        algorithm TEXT NOT NULL,
+                        digest TEXT NOT NULL UNIQUE,
+                        file_size INTEGER NOT NULL,
+                        archive_member_count INTEGER NOT NULL,
+                        created_at TEXT NOT NULL
+                    )
+                    """
+                )
+                for column, definition in {
+                    "identity_strategy": "TEXT",
+                    "confidence": "TEXT",
+                    "evidence_json": "TEXT",
+                    "explanation": "TEXT",
+                }.items():
+                    connection.execute(
+                        f"ALTER TABLE campaigns ADD COLUMN {column} {definition}"
+                    )
+                connection.execute(
+                    """
+                    ALTER TABLE imports ADD COLUMN fingerprint_id
+                    TEXT REFERENCES archive_fingerprints(id)
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO campaigns
+                        (id, display_name, source_hint, created_at,
+                         identity_strategy, confidence, evidence_json,
+                         explanation)
+                    VALUES ('v2-campaign', 'V2', 'v2-campaign', '2026-01-01',
+                            'stable_internal_identifiers', 'medium', ?,
+                            'legacy v2 identity')
+                    """,
+                    (legacy_evidence,),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO imports
+                        (id, campaign_id, source_archive, archive_sha256,
+                         save_root, imported_at)
+                    VALUES ('v2-import', 'v2-campaign', 'save.zip', ?,
+                            'root', '2026-01-01')
+                    """,
+                    ("d" * 64,),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO snapshots
+                        (id, import_id, schema_version, snapshot_json, created_at)
+                    VALUES ('v2-snapshot', 'v2-import', '1.0', '{}',
+                            '2026-01-01')
+                    """
+                )
+                connection.execute("PRAGMA user_version = 2")
+                connection.commit()
+
+            database = AlquimistaDatabase(database_path)
+            database.initialize()
+            with closing(sqlite3.connect(database_path)) as connection:
+                self.assertEqual(
+                    connection.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0],
+                    1,
+                )
+                self.assertEqual(
+                    connection.execute(
+                        """
+                        SELECT resolution_state
+                        FROM campaigns WHERE id = 'v2-campaign'
+                        """
+                    ).fetchone()[0],
+                    "candidate",
+                )
+                self.assertEqual(
+                    connection.execute(
+                        """
+                        SELECT COUNT(*) FROM campaign_identity_signals
+                        WHERE campaign_id = 'v2-campaign'
+                        """
+                    ).fetchone()[0],
+                    2,
+                )
+                first_dump = "\n".join(connection.iterdump())
+
+            database.initialize()
+            with closing(sqlite3.connect(database_path)) as connection:
+                second_dump = "\n".join(connection.iterdump())
+                self.assertEqual(
+                    connection.execute("PRAGMA user_version").fetchone()[0],
+                    DATABASE_VERSION,
+                )
+                self.assertEqual(
+                    connection.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0],
+                    1,
+                )
+            self.assertEqual(first_dump, second_dump)
 
     def test_cli_campaign_compare_timeline_and_analyze(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -702,8 +1202,22 @@ class PersistenceAndCliTests(unittest.TestCase):
             database_path = temporary_path / "memory.sqlite3"
             first = temporary_path / "first.zip"
             second = temporary_path / "second.zip"
-            create_save_zip(first, files=campaign_files(day=1, balance=20))
-            create_save_zip(second, files=campaign_files(day=2, balance=200))
+            create_save_zip(
+                first,
+                files=campaign_files(
+                    day=1,
+                    balance=20,
+                    native_campaign_id="cli-campaign",
+                ),
+            )
+            create_save_zip(
+                second,
+                files=campaign_files(
+                    day=2,
+                    balance=200,
+                    native_campaign_id="cli-campaign",
+                ),
+            )
             output = io.StringIO()
             with redirect_stdout(output):
                 self.assertEqual(
