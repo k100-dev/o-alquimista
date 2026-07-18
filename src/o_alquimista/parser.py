@@ -948,13 +948,21 @@ def snapshot_and_fingerprint_from_zip(
     """Lê o ZIP uma vez para identidade e uma vez para extração segura."""
     archive = archive_path.expanduser().resolve()
     fingerprint = fingerprint_archive(archive)
-    with extracted_save(archive) as (save_root, archive_root):
-        snapshot = read_save_model(
-            save_root,
-            source_archive=archive,
-            archive_root=archive_root,
-            archive_fingerprint=fingerprint,
-        )
+    try:
+        with extracted_save(archive) as (save_root, archive_root):
+            snapshot = read_save_model(
+                save_root,
+                source_archive=archive,
+                archive_root=archive_root,
+                archive_fingerprint=fingerprint,
+            )
+    except Exception as processing_error:
+        verified_fingerprint = fingerprint_archive(archive)
+        if verified_fingerprint != fingerprint:
+            raise InvalidArchiveError(
+                "O ZIP foi alterado por outro processo durante a leitura."
+            ) from processing_error
+        raise
     verified_fingerprint = fingerprint_archive(archive)
     if verified_fingerprint != fingerprint:
         raise InvalidArchiveError(

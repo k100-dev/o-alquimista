@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import zipfile
 from pathlib import Path
 from typing import Any, Iterable
 from uuid import uuid4
 
-from .archive import validate_archive
+from .archive import archive_member_count, validate_archive
 from .json_codec import dumps as json_dumps
 from .memory_models import (
     ArchiveFingerprint,
@@ -51,8 +50,7 @@ def fingerprint_archive(archive_path: Path) -> ArchiveFingerprint:
     with path.open("rb") as source:
         for chunk in iter(lambda: source.read(HASH_CHUNK_BYTES), b""):
             digest.update(chunk)
-    with zipfile.ZipFile(path, mode="r") as archive:
-        member_count = len(archive.infolist())
+    member_count = archive_member_count(path)
     return ArchiveFingerprint(
         algorithm="sha256",
         digest=digest.hexdigest().lower(),

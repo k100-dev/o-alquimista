@@ -50,6 +50,34 @@ WINDOWS_RESERVED_COMPONENTS = frozenset(
         *(f"LPT{index}" for index in range(1, 10)),
     }
 )
+SUPPORTED_COMPRESSION_METHODS = frozenset(
+    method
+    for method in (
+        zipfile.ZIP_STORED,
+        zipfile.ZIP_DEFLATED,
+        zipfile.ZIP_BZIP2,
+        zipfile.ZIP_LZMA,
+        getattr(zipfile, "ZIP_ZSTANDARD", None),
+    )
+    if method is not None
+)
+EXPECTED_ZIP_ERRORS = (
+    zipfile.BadZipFile,
+    zipfile.LargeZipFile,
+    RuntimeError,
+    NotImplementedError,
+    EOFError,
+)
+
+
+def _invalid_zip_failure(exc: BaseException) -> InvalidArchiveError:
+    if isinstance(exc, RuntimeError):
+        message = "O ZIP contém entrada criptografada ou ilegível."
+    elif isinstance(exc, NotImplementedError):
+        message = "O ZIP usa um método de compressão não suportado."
+    else:
+        message = "O ZIP está corrompido ou não pôde ser lido integralmente."
+    return InvalidArchiveError(message)
 
 
 def _preflight_central_directory(path: Path) -> None:
@@ -108,9 +136,22 @@ def validate_archive(archive_path: Path) -> Path:
     if path.stat().st_size > MAX_ARCHIVE_BYTES:
         raise ArchiveLimitError(f"O ZIP excede {MAX_ARCHIVE_BYTES} bytes.")
     _preflight_central_directory(path)
-    if not zipfile.is_zipfile(path):
+    try:
+        is_zip = zipfile.is_zipfile(path)
+    except EXPECTED_ZIP_ERRORS as exc:
+        raise _invalid_zip_failure(exc) from exc
+    if not is_zip:
         raise InvalidArchiveError(f"O arquivo não é um ZIP válido: {archive_path.name}")
     return path
+
+
+def archive_member_count(archive_path: Path) -> int:
+    """Conta entradas convertendo falhas esperadas de zipfile em erro de domínio."""
+    try:
+        with zipfile.ZipFile(archive_path, mode="r") as archive:
+            return len(archive.infolist())
+    except EXPECTED_ZIP_ERRORS as exc:
+        raise _invalid_zip_failure(exc) from exc
 
 
 def _is_windows_reserved_component(component: str) -> bool:
@@ -168,6 +209,12 @@ def _validate_resource_limits(members: list[zipfile.ZipInfo]) -> None:
 
     total_uncompressed = 0
     for info in members:
+        if info.flag_bits & 0x1:
+            raise InvalidArchiveError("O ZIP contém entrada criptografada.")
+        if info.compress_type not in SUPPORTED_COMPRESSION_METHODS:
+            raise InvalidArchiveError(
+                "O ZIP usa um método de compressão não suportado."
+            )
         if info.is_dir():
             continue
         if info.file_size < 0 or info.compress_size < 0:
@@ -212,8 +259,15 @@ def _copy_member_limited(
 def extract_archive_safely(archive_path: Path, destination: Path) -> None:
     """Extrai membros individualmente após validar todos os caminhos."""
     destination = destination.resolve()
-    with zipfile.ZipFile(archive_path, mode="r") as archive:
-        members = archive.infolist()
+    try:
+        archive_context = zipfile.ZipFile(archive_path, mode="r")
+    except EXPECTED_ZIP_ERRORS as exc:
+        raise _invalid_zip_failure(exc) from exc
+    with archive_context as archive:
+        try:
+            members = archive.infolist()
+        except EXPECTED_ZIP_ERRORS as exc:
+            raise _invalid_zip_failure(exc) from exc
         _validate_resource_limits(members)
         relative_paths = [_safe_relative_path(info) for info in members]
         normalized_names = [
@@ -234,12 +288,19 @@ def extract_archive_safely(archive_path: Path, destination: Path) -> None:
                 target.mkdir(parents=True, exist_ok=True)
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
-            with archive.open(info, mode="r") as source, target.open("xb") as output:
-                member_written, total_written = _copy_member_limited(
-                    source,
-                    output,
-                    total_written=total_written,
-                )
+            try:
+                source_context = archive.open(info, mode="r")
+            except EXPECTED_ZIP_ERRORS as exc:
+                raise _invalid_zip_failure(exc) from exc
+            with source_context as source, target.open("xb") as output:
+                try:
+                    member_written, total_written = _copy_member_limited(
+                        source,
+                        output,
+                        total_written=total_written,
+                    )
+                except EXPECTED_ZIP_ERRORS as exc:
+                    raise _invalid_zip_failure(exc) from exc
                 if member_written != info.file_size:
                     raise InvalidArchiveError(
                         "O tamanho extraído não corresponde ao declarado pelo ZIP."
