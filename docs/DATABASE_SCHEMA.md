@@ -33,10 +33,19 @@
 - persistência de importação usa `BEGIN IMMEDIATE`, commit atômico e rollback
   em qualquer falha;
 - conexões fecham em `finally`, inclusive em erro de configuração.
+- a fronteira `persist_import` valida caminhos de proveniência antes de
+  inicializar ou inserir registros; caminhos absolutos, drive Windows, UNC,
+  `..` e ADS são rejeitados mesmo em chamadas diretas;
+- `imported_at` é somente metadado operacional e não participa da ordenação da
+  timeline.
 
 ## Migração
 
-`initialize()` é transacional e idempotente. Bancos v1 recebem fingerprints e
+`initialize()` lê `PRAGMA user_version` antes de qualquer migração. Bancos com
+versão superior a `3` são rejeitados sem alteração de schema, versão ou dados;
+não existe downgrade automático.
+
+Para versões suportadas, `initialize()` é transacional e idempotente. Bancos v1 recebem fingerprints e
 estruturas de memória. Bancos v2 recebem `resolution_state`, sinais,
 associações e marcos reconstruíveis. Snapshots, imports e campanhas existentes
 são preservados; `PRAGMA user_version` passa a `3`.

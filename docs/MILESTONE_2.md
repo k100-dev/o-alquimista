@@ -5,7 +5,7 @@
 - fingerprint SHA-256 integral e determinístico;
 - deduplicação idempotente garantida pelo banco;
 - identidade de campanha com estratégia, confiança e evidência;
-- timeline ordenada por tempo interno, progressão e fallback de importação;
+- timeline ordenada por sinais internos e desempate por ID estável;
 - comparação financeira e operacional;
 - marcos determinísticos;
 - recomendações locais baseadas em regras identificadas;
@@ -46,8 +46,14 @@ snapshots ou marcos entre as campanhas envolvidas.
 ## Linha do tempo
 
 A ordenação usa, nesta ordem: dia interno, horário interno, playtime,
-progressão total, data de importação e `snapshot_id`. Os primeiros campos
-disponíveis prevalecem; o ID resolve empates deterministicamente.
+progressão total, rank, tier, XP e `snapshot_id`. Os sinais internos disponíveis
+prevalecem; o ID resolve empates totais deterministicamente. `imported_at`
+permanece metadado operacional e nunca participa da ordem analítica.
+
+Assim, dois bancos que recebem os mesmos snapshots em ordens ou horários
+diferentes produzem a mesma timeline, relações predecessor/sucessor, marcos,
+comparações e análise. Importações retroativas continuam reconstruindo a ordem
+e os marcos dentro da mesma transação.
 
 ## Comparação
 

@@ -10,6 +10,9 @@
 - ZIP, save e arquivos do jogo nunca são destinos;
 - saída dentro de uma pasta de save fonte é bloqueada.
 - relatórios analíticos não podem sobrescrever o SQLite nem usar destino `.zip`.
+- CRC inválido, diretório central corrompido, entrada criptografada, método de
+  compressão não suportado e EOF inesperado são convertidos em erro curto de
+  domínio, sem traceback ou caminho absoluto na CLI.
 
 ## Entradas bloqueadas
 
@@ -43,6 +46,16 @@ extensão é avaliado. Assim, variantes como `CON.txt`, `NUL.dat`,
 
 Os limites são verificados antes e durante a extração. A raiz temporária é
 limpa em sucesso ou falha.
+
+## Proveniência persistida
+
+`persist_import` não confia na sanitização da CLI. Antes de qualquer `INSERT`,
+ele percorre `source_archive`, `save_root`, `source_file`, `source_files` e
+origens equivalentes do snapshot. Somente caminhos lógicos relativos são
+aceitos; caminhos POSIX absolutos, drives Windows, UNC, segmentos `..`, ADS e
+NUL são rejeitados com rollback integral. Valores relativos como
+`exports/save.zip`, `Players/local/Inventory.json` e
+`nested/logical-save` permanecem válidos.
 
 ## Privacidade
 
