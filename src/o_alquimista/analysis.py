@@ -407,17 +407,14 @@ def _sortable_value(value: Any) -> tuple[bool, Decimal, str]:
 def timeline_sort_key(entry: dict[str, Any]) -> tuple[Any, ...]:
     moment = entry.get("observable_game_moment", {})
     progression = entry.get("progression_summary", {})
-    elapsed = moment.get("elapsed_days")
-    time_of_day = moment.get("time_of_day")
-    playtime = moment.get("playtime_seconds")
-    total_xp = progression.get("total_xp")
-    imported_at = entry.get("imported_at") or ""
     return (
-        _sortable_value(elapsed),
-        _sortable_value(time_of_day),
-        _sortable_value(playtime),
-        _sortable_value(total_xp),
-        imported_at,
+        _sortable_value(moment.get("elapsed_days")),
+        _sortable_value(moment.get("time_of_day")),
+        _sortable_value(moment.get("playtime_seconds")),
+        _sortable_value(progression.get("total_xp")),
+        _sortable_value(progression.get("rank")),
+        _sortable_value(progression.get("tier")),
+        _sortable_value(progression.get("xp")),
         entry.get("snapshot_id", ""),
     )
 

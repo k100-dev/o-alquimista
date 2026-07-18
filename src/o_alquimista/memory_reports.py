@@ -85,7 +85,7 @@ def build_timeline_markdown(
     lines += [
         "## Cálculos derivados",
         "",
-        "- A ordem usa tempo interno, progressão, importação e ID como desempate.",
+        "- A ordem usa somente tempo interno, progressão e ID estável como desempate.",
         "",
         "## Inferências",
         "",
