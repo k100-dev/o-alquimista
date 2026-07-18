@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import zipfile
 from pathlib import Path
 from typing import Any, Iterable
 from uuid import uuid4
 
 from .archive import validate_archive
+from .json_codec import dumps as json_dumps
 from .memory_models import (
     ArchiveFingerprint,
     CampaignAssociationSignal,
@@ -31,7 +31,7 @@ NATIVE_CAMPAIGN_FIELDS: dict[str, ConfidenceLevel] = {
 
 
 def _stable_digest(value: Any) -> str:
-    serialized = json.dumps(
+    serialized = json_dumps(
         value,
         ensure_ascii=False,
         sort_keys=True,

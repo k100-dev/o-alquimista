@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -14,6 +13,8 @@ from .database import AlquimistaDatabase
 from .diff import diff_snapshots
 from .errors import AlquimistaError, UnsafeArchiveError
 from .identity import resolve_campaign_identity
+from .json_codec import dumps as json_dumps
+from .json_codec import loads_snapshot
 from .memory_reports import (
     build_analysis_markdown,
     build_comparison_markdown,
@@ -28,7 +29,7 @@ from .report import build_markdown
 
 
 def _json_text(data: object) -> str:
-    return json.dumps(
+    return json_dumps(
         data,
         indent=2,
         ensure_ascii=False,
@@ -285,8 +286,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "diff":
-            previous = json.loads(args.previous.read_text(encoding="utf-8"))
-            current = json.loads(args.current.read_text(encoding="utf-8"))
+            previous = loads_snapshot(args.previous.read_text(encoding="utf-8"))
+            current = loads_snapshot(args.current.read_text(encoding="utf-8"))
             write_json(args.out, diff_snapshots(previous, current))
             print(f"Comparação criada: {args.out.name}")
             return 0
@@ -336,7 +337,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         AlquimistaError,
         FileNotFoundError,
         ValueError,
-        json.JSONDecodeError,
         OSError,
         sqlite3.Error,
     ) as exc:

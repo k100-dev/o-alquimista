@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any, Callable, Iterable
 
 from .errors import CampaignMismatchError
@@ -15,6 +15,7 @@ from .evidence import (
     snapshot_evidence,
     unavailable_evidence,
 )
+from .json_codec import to_finite_decimal
 from .memory_models import (
     CampaignAnalysis,
     ChangeStatus,
@@ -30,16 +31,13 @@ from .memory_models import (
 
 
 def _decimal(value: Any) -> Decimal | None:
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        return Decimal(str(value))
-    except (InvalidOperation, ValueError):
-        return None
+    return to_finite_decimal(value)
 
 
 def _decimal_text(value: Decimal) -> str:
-    return format(value.quantize(Decimal("0.01")), "f")
+    if not value.is_finite():
+        raise ValueError("Resultado decimal não finito.")
+    return format(value, ".2f")
 
 
 def _financial_change(
@@ -216,9 +214,15 @@ def compare_snapshots(
         )
     finance_previous = previous.get("finance")
     finance_current = current.get("finance")
-    if not isinstance(finance_previous, dict):
+    if (
+        not _section_is_observed(previous, "finance")
+        or not isinstance(finance_previous, dict)
+    ):
         finance_previous = {}
-    if not isinstance(finance_current, dict):
+    if (
+        not _section_is_observed(current, "finance")
+        or not isinstance(finance_current, dict)
+    ):
         finance_current = {}
     financial_fields = (
         "online_balance",

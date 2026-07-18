@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
+from .json_codec import to_finite_decimal
 
-def _number_delta(current: Any, previous: Any) -> float:
-    return round(float(current or 0) - float(previous or 0), 2)
+
+def _number_delta(current: Any, previous: Any) -> Decimal:
+    current_decimal = to_finite_decimal(current) or Decimal("0")
+    previous_decimal = to_finite_decimal(previous) or Decimal("0")
+    return current_decimal - previous_decimal
 
 
 def diff_snapshots(

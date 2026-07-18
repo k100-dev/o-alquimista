@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
+
+from .json_codec import decimal_text, to_finite_decimal
 
 
 def money(value: Any) -> str:
-    if value is None:
+    decimal = to_finite_decimal(value)
+    if decimal is None:
         return "indisponível"
-    return f"${float(value):,.2f}"
+    return f"${decimal:,.2f}"
 
 
 def build_markdown(snapshot: dict[str, Any]) -> str:
@@ -54,10 +58,11 @@ def build_markdown(snapshot: dict[str, Any]) -> str:
     ]
     prices = snapshot["products"]["prices"]
     for item_id, quantity in inventory["quantities"].items():
-        price = float(prices.get(item_id, 0) or 0)
+        price = to_finite_decimal(prices.get(item_id)) or Decimal("0")
+        quantity_decimal = to_finite_decimal(quantity) or Decimal("0")
         lines.append(
-            f"| `{item_id}` | {quantity:g} | {money(price)} | "
-            f"{money(float(quantity) * price)} |"
+            f"| `{item_id}` | {decimal_text(quantity_decimal)} | {money(price)} | "
+            f"{money(quantity_decimal * price)} |"
         )
 
     lines += [

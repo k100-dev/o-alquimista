@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
@@ -21,6 +20,9 @@ from .analysis import (
 from .errors import RecordNotFoundError
 from .evidence import deterministic_id, snapshot_evidence
 from .identity import resolve_campaign_identity
+from .json_codec import dumps as json_dumps
+from .json_codec import loads as json_loads
+from .json_codec import loads_snapshot
 from .memory_models import (
     ArchiveFingerprint,
     CampaignAnalysis,
@@ -341,8 +343,8 @@ class AlquimistaDatabase:
         migrated_ids: list[str] = []
         for row in rows:
             try:
-                payload = json.loads(row["payload_json"])
-            except (TypeError, json.JSONDecodeError):
+                payload = json_loads(row["payload_json"])
+            except (TypeError, ValueError):
                 continue
             if not isinstance(payload, dict) or "milestone_id" not in payload:
                 continue
@@ -380,8 +382,8 @@ class AlquimistaDatabase:
         ).fetchall()
         for row in rows:
             try:
-                evidence_items = json.loads(row["evidence_json"])
-            except (TypeError, json.JSONDecodeError):
+                evidence_items = json_loads(row["evidence_json"])
+            except (TypeError, ValueError):
                 continue
             signals: list[dict[str, str]] = []
             for evidence in evidence_items if isinstance(evidence_items, list) else []:
@@ -443,7 +445,7 @@ class AlquimistaDatabase:
 
     @staticmethod
     def _json(value: Any) -> str:
-        return json.dumps(
+        return json_dumps(
             value,
             ensure_ascii=False,
             sort_keys=True,
@@ -654,7 +656,7 @@ class AlquimistaDatabase:
         ).fetchall()
         entries: list[dict[str, Any]] = []
         for row in rows:
-            entry = json.loads(row["entry_json"])
+            entry = json_loads(row["entry_json"])
             entry["imported_at"] = row["imported_at"]
             entries.append(entry)
         ordered = sorted(entries, key=timeline_sort_key)
@@ -831,7 +833,7 @@ class AlquimistaDatabase:
         ).fetchone()
         if row is None:
             raise RecordNotFoundError(f"Snapshot não encontrado: {snapshot_id}")
-        return json.loads(row["snapshot_json"])
+        return loads_snapshot(row["snapshot_json"])
 
     @classmethod
     def _persist_detected_milestones(
@@ -1183,7 +1185,7 @@ class AlquimistaDatabase:
         associations: list[dict[str, Any]] = []
         for row in rows:
             association = dict(row)
-            association["evidence"] = json.loads(
+            association["evidence"] = json_loads(
                 association.pop("evidence_json")
             )
             associations.append(association)
@@ -1221,7 +1223,7 @@ class AlquimistaDatabase:
                 raise RecordNotFoundError(f"Snapshot não encontrado: {snapshot_id}")
         return {
             "snapshot_id": row["snapshot_id"],
-            "snapshot": json.loads(row["snapshot_json"]),
+            "snapshot": loads_snapshot(row["snapshot_json"]),
             "import_id": row["import_id"],
             "campaign_id": row["campaign_id"],
             "archive_hash": row["archive_sha256"],
@@ -1314,7 +1316,7 @@ class AlquimistaDatabase:
             ).fetchall()
         milestones: list[DetectedMilestone] = []
         for row in rows:
-            payload = json.loads(row["payload_json"])
+            payload = json_loads(row["payload_json"])
             if "milestone_id" not in payload:
                 continue
             evidence = tuple(

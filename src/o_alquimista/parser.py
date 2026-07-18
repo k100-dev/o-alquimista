@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import json
 from collections import Counter, defaultdict
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable
 
 from .archive import ESSENTIAL_FILES, extracted_save
 from .errors import IncompleteSaveError, InvalidArchiveError, SaveDataError
 from .identity import fingerprint_archive
+from .json_codec import loads as json_loads
+from .json_codec import to_finite_decimal
 from .memory_models import ArchiveFingerprint
 from .models import (
     DataOrigin,
@@ -36,8 +38,8 @@ from .models import (
 def load_json(path: Path) -> Any:
     """Lê JSON sem abrir o arquivo para escrita."""
     try:
-        return json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        return json_loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeError, ValueError) as exc:
         raise SaveDataError(f"Não foi possível ler {path.name}: {exc}") from exc
 
 
@@ -47,8 +49,8 @@ def decode_embedded_json(value: Any) -> Any:
         stripped = value.strip()
         if stripped.startswith(("{", "[")):
             try:
-                return decode_embedded_json(json.loads(stripped))
-            except json.JSONDecodeError:
+                return decode_embedded_json(json_loads(stripped))
+            except ValueError:
                 return value
         return value
     if isinstance(value, list):
@@ -64,20 +66,26 @@ def _as_object(value: Any, path: Path) -> dict[str, Any]:
     return value
 
 
-def _number(value: Any) -> float:
-    try:
-        return float(value or 0)
-    except (TypeError, ValueError):
-        return 0.0
+def _decimal_number(value: Any) -> Decimal:
+    decimal = to_finite_decimal(value)
+    return decimal if decimal is not None else Decimal("0")
 
 
-def _optional_number(value: Any) -> float | None:
+def _optional_money(value: Any) -> Decimal | None:
+    return to_finite_decimal(value)
+
+
+def _metric_number(value: Any) -> int | float | None:
+    """Conserva contagens inteiras e usa float apenas para métricas não monetárias."""
     if value is None or isinstance(value, bool):
         return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, float):
+        return value
+    return None
 
 
 def _unknown_fields(
@@ -122,14 +130,14 @@ def _parse_items(
         raw = decode_embedded_json(undecoded)
         if not isinstance(raw, dict) or not raw.get("ID"):
             continue
-        quantity = _number(raw.get("Quantity"))
+        quantity = _decimal_number(raw.get("Quantity"))
         if quantity <= 0:
             continue
         parsed.append(
             InventoryItem(
                 item_id=str(raw["ID"]),
                 quantity=quantity,
-                cash_balance=_number(raw.get("CashBalance")),
+                cash_balance=_decimal_number(raw.get("CashBalance")),
                 quality=str(raw["Quality"]) if raw.get("Quality") is not None else None,
                 packaging_id=(
                     str(raw["PackagingID"])
@@ -145,9 +153,11 @@ def _parse_items(
 
 def _summarize_items(items: Iterable[InventoryItem]) -> Inventory:
     item_list = tuple(items)
-    quantities: Counter[str] = Counter()
-    variants: dict[str, Counter[str]] = defaultdict(Counter)
-    cash = 0.0
+    quantities: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+    variants: dict[str, dict[str, Decimal]] = defaultdict(
+        lambda: defaultdict(lambda: Decimal("0"))
+    )
+    cash = Decimal("0")
     origins: list[DataOrigin] = []
     for item in item_list:
         quantities[item.item_id] += item.quantity
@@ -157,9 +167,17 @@ def _summarize_items(items: Iterable[InventoryItem]) -> Inventory:
             variant = f"{item.quality or 'unknown'} / {item.packaging_id or 'unknown'}"
             variants[item.item_id][variant] += item.quantity
     return Inventory(
-        quantities=dict(quantities.most_common()),
-        cash=round(cash, 2),
-        variants={key: dict(value) for key, value in variants.items()},
+        quantities=dict(
+            sorted(
+                quantities.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ),
+        cash=cash,
+        variants={
+            key: dict(sorted(value.items()))
+            for key, value in sorted(variants.items())
+        },
         items=item_list,
         origins=tuple(origins),
     )
@@ -632,7 +650,7 @@ def read_save_model(
         handled_files.add(vehicle_path)
 
     prices = {
-        str(row["String"]): row.get("Int")
+        str(row["String"]): _optional_money(row.get("Int"))
         for row in products.get("ProductPrices", [])
         if isinstance(row, dict) and row.get("String") is not None
     }
@@ -644,9 +662,7 @@ def read_save_model(
             product_id=product_id,
             discovered=product_id in discovered,
             listed=product_id in listed,
-            reference_price=(
-                _number(prices[product_id]) if prices.get(product_id) is not None else None
-            ),
+            reference_price=prices[product_id],
             origin=_origin("Products.json", "$"),
             raw=None,
         )
@@ -680,12 +696,12 @@ def read_save_model(
 
     inventory = _summarize_items(all_items)
     market_value = (
-        round(
-            sum(
-                quantity * _number(prices.get(item_id))
+        sum(
+            (
+                quantity * (prices.get(item_id) or Decimal("0"))
                 for item_id, quantity in inventory.quantities.items()
             ),
-            2,
+            start=Decimal("0"),
         )
         if inventory_availability.state == "observed"
         else None
@@ -762,7 +778,7 @@ def read_save_model(
         unknown=_unknown_fields(game, {"OrganisationName"}, "Game.json"),
     )
 
-    online_balance = _optional_number(money.get("OnlineBalance"))
+    online_balance = _optional_money(money.get("OnlineBalance"))
     loose_cash = (
         inventory.cash
         if inventory_availability.state == "observed"
@@ -771,36 +787,16 @@ def read_save_model(
     return NormalizedSnapshot(
         metadata=metadata,
         finance=Finance(
-            online_balance=(
-                round(online_balance, 2) if online_balance is not None else None
-            ),
+            online_balance=online_balance,
             loose_cash=loose_cash,
             liquid_cash_estimate=(
-                round(online_balance + loose_cash, 2)
+                online_balance + loose_cash
                 if online_balance is not None and loose_cash is not None
                 else None
             ),
-            networth=(
-                round(value, 2)
-                if (value := _optional_number(money.get("Networth"))) is not None
-                else None
-            ),
-            lifetime_earnings=(
-                round(value, 2)
-                if (
-                    value := _optional_number(money.get("LifetimeEarnings"))
-                )
-                is not None
-                else None
-            ),
-            weekly_deposit_sum=(
-                round(value, 2)
-                if (
-                    value := _optional_number(money.get("WeeklyDepositSum"))
-                )
-                is not None
-                else None
-            ),
+            networth=_optional_money(money.get("Networth")),
+            lifetime_earnings=_optional_money(money.get("LifetimeEarnings")),
+            weekly_deposit_sum=_optional_money(money.get("WeeklyDepositSum")),
             inventory_list_price_estimate=market_value,
             origins={
                 "online_balance": _origin("Money.json", "OnlineBalance"),
@@ -826,9 +822,13 @@ def read_save_model(
             ),
         ),
         time=GameTime(
-            elapsed_days=time_data.get("ElapsedDays"),
-            time_of_day=time_data.get("TimeOfDay"),
-            playtime_seconds=time_data.get("Playtime"),
+            elapsed_days=_metric_number(time_data.get("ElapsedDays")),
+            time_of_day=(
+                _metric_number(time_data.get("TimeOfDay"))
+                if not isinstance(time_data.get("TimeOfDay"), str)
+                else time_data.get("TimeOfDay")
+            ),
+            playtime_seconds=_metric_number(time_data.get("Playtime")),
             origins={
                 "elapsed_days": _origin("Time.json", "ElapsedDays"),
                 "time_of_day": _origin("Time.json", "TimeOfDay"),
@@ -843,8 +843,8 @@ def read_save_model(
         progression=Progression(
             rank=rank.get("Rank"),
             tier=rank.get("Tier"),
-            xp=rank.get("XP"),
-            total_xp=rank.get("TotalXP"),
+            xp=_metric_number(rank.get("XP")),
+            total_xp=_metric_number(rank.get("TotalXP")),
             unlocked_regions=tuple(rank.get("UnlockedRegions", [])),
             origins={
                 "rank": _origin("Rank.json", "Rank"),

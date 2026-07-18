@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from typing import Any
 
+from .json_codec import dumps as json_dumps
 from .memory_models import ConfidenceLevel, Evidence
 
 
 def deterministic_id(prefix: str, *parts: Any) -> str:
-    payload = json.dumps(
+    payload = json_dumps(
         parts,
         ensure_ascii=False,
         sort_keys=True,

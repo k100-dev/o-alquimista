@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from decimal import Decimal
 from typing import Any, Literal, TypeAlias, Union
 
 JsonValue: TypeAlias = Union[
-    None, bool, int, float, str, list["JsonValue"], dict[str, "JsonValue"]
+    None,
+    bool,
+    int,
+    float,
+    Decimal,
+    str,
+    list["JsonValue"],
+    dict[str, "JsonValue"],
 ]
 SectionAvailabilityState = Literal[
     "observed",
@@ -56,13 +64,13 @@ class Metadata:
 
 @dataclass(frozen=True, slots=True)
 class Finance:
-    online_balance: float | None
-    loose_cash: float | None
-    liquid_cash_estimate: float | None
-    networth: float | None
-    lifetime_earnings: float | None
-    weekly_deposit_sum: float | None
-    inventory_list_price_estimate: float | None
+    online_balance: Decimal | None
+    loose_cash: Decimal | None
+    liquid_cash_estimate: Decimal | None
+    networth: Decimal | None
+    lifetime_earnings: Decimal | None
+    weekly_deposit_sum: Decimal | None
+    inventory_list_price_estimate: Decimal | None
     origins: dict[str, DataOrigin] = field(default_factory=dict)
     unknown: tuple[UnknownField, ...] = ()
 
@@ -92,7 +100,7 @@ class Product:
     product_id: str
     discovered: bool
     listed: bool
-    reference_price: float | None
+    reference_price: Decimal | None
     origin: DataOrigin
     raw: JsonValue = None
 
@@ -101,7 +109,7 @@ class Product:
 class ProductCatalog:
     discovered: tuple[str, ...]
     listed: tuple[str, ...]
-    prices: dict[str, float | int | None]
+    prices: dict[str, Decimal | None]
     mix_recipes: tuple[JsonValue, ...]
     active_mix: JsonValue
     entries: tuple[Product, ...]
@@ -113,8 +121,8 @@ class ProductCatalog:
 @dataclass(frozen=True, slots=True)
 class InventoryItem:
     item_id: str
-    quantity: float
-    cash_balance: float
+    quantity: Decimal
+    cash_balance: Decimal
     quality: str | None
     packaging_id: str | None
     origin: DataOrigin
@@ -123,9 +131,9 @@ class InventoryItem:
 
 @dataclass(frozen=True, slots=True)
 class Inventory:
-    quantities: dict[str, float]
-    cash: float
-    variants: dict[str, dict[str, float]]
+    quantities: dict[str, Decimal]
+    cash: Decimal
+    variants: dict[str, dict[str, Decimal]]
     items: tuple[InventoryItem, ...]
     origins: tuple[DataOrigin, ...] = ()
     unknown: tuple[UnknownField, ...] = ()
