@@ -32,6 +32,8 @@ ZIP read-only
 ## Módulos
 
 - `archive.py`: limites, validação de entradas, extração e escopo lógico;
+- `json_codec.py`: leitura decimal, rejeição de não finitos, serialização
+  canônica e restauração de snapshots persistidos;
 - `identity.py`: `ArchiveFingerprint` e `CampaignIdentity`;
 - `parser.py`: normalização read-only e preservação `raw/unknown`;
 - `memory_models.py`: evidência, timeline, comparação, marco e recomendação;
@@ -63,6 +65,20 @@ como texto decimal. Campo ausente vira `unknown` ou `not_comparable`, nunca
 zero. Coleções distinguem adição, remoção, alteração e invariância somente
 quando ambos os snapshots registram a seção como `observed`; nos demais estados
 o resultado é `unknown`.
+
+## Codec numérico
+
+O JSON do save é lido com `parse_float=Decimal` e `parse_int=int`. Essa escolha
+preserva frações sem erro binário e mantém contagens e índices como inteiros.
+Campos monetários, preços, saldos de itens e quantidades são normalizados
+explicitamente para `Decimal`; métricas não monetárias podem continuar como
+`int` ou `float`.
+
+Toda serialização interna passa pelo mesmo codec. `Decimal` é persistido como
+string decimal sem expoente, sem conversão intermediária para `float`.
+`allow_nan=False` e a rejeição de constantes JSON impedem `NaN`, `Infinity` e
+`-Infinity`. A leitura de snapshots antigos restaura os campos decimais
+conhecidos, portanto não exige alteração do schema SQLite v3.
 
 ## Recomendações
 

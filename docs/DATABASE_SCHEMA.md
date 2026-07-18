@@ -48,3 +48,15 @@ não há evidência segura para repartir seus snapshots.
 
 Registros legados podem conservar texto histórico criado por versões
 anteriores; novas importações nunca persistem caminho absoluto.
+
+## Representação monetária
+
+O schema permanece na versão 3. Não foi necessária migração estrutural para a
+correção de precisão. Novos snapshots serializam dinheiro, preços e quantidades
+decimais como strings exatas, por exemplo `"0.10"` e
+`"12345678901234567890.99"`.
+
+Na recuperação, o codec restaura os campos conhecidos para `Decimal`. Bancos
+v1, v2 e v3 que armazenaram esses valores como números JSON continuam
+compatíveis: o texto numérico legado é interpretado diretamente como
+`Decimal`, sem passagem por `float`.

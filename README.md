@@ -15,10 +15,11 @@ calculada em blocos, sem extração. A leitura do save ocorre em diretório
 temporário removido ao final, inclusive em falhas.
 
 O extrator rejeita caminhos absolutos, drives e ADS do Windows, UNC, segmentos
-`..`, links simbólicos, arquivos especiais, duplicatas ambíguas, profundidade
-excessiva e arquivos fora da raiz lógica detectada. Também limita tamanho do
-ZIP, diretório central, quantidade de entradas, tamanho individual, total
-descompactado e razão de compressão.
+`..`, dispositivos reservados do Windows (`CON`, `NUL`, `COM1`, `LPT1` e
+equivalentes), links simbólicos, arquivos especiais, duplicatas ambíguas,
+profundidade excessiva e arquivos fora da raiz lógica detectada. Também limita
+tamanho do ZIP, diretório central, quantidade de entradas, tamanho individual,
+total descompactado e razão de compressão.
 
 A CLI impede que uma saída seja gravada dentro de uma pasta de save usada como
 fonte, impede que o SQLite substitua o ZIP e bloqueia relatórios que tentem
@@ -112,6 +113,13 @@ equivalem a coleção vazia. Inferências e recomendações sempre carregam
 confiança, justificativa, evidências, limitações e informação ausente. Consulte
 [docs/EVIDENCE_MODEL.md](docs/EVIDENCE_MODEL.md).
 
+Valores monetários são lidos e calculados com `Decimal`, sem passagem por
+`float`. Inteiros do JSON permanecem `int`, inclusive contagens; quantidades
+fracionárias e preços usam `Decimal` conforme sua semântica. Na persistência,
+decimais são strings exatas, determinísticas e independentes de locale. Bancos
+v1, v2 e v3 com números JSON antigos continuam legíveis sem migração de schema.
+`NaN` e infinitos não são aceitos.
+
 ## Persistência
 
 O SQLite v3 possui campanhas, sinais e associações candidatas, fingerprints,
@@ -144,6 +152,8 @@ locais.
   identificadas e testáveis; não são fatos do jogo.
 - JSONs são carregados em memória depois que o ZIP passa pelos limites de
   segurança; o parser ainda não é streaming.
+- Métricas não monetárias fracionárias, como tempo de jogo, continuam podendo
+  usar `float`; elas não participam dos cálculos financeiros.
 - Dados `raw/unknown` podem conter identificadores presentes no save. Nada é
   enviado externamente, mas snapshots e bancos devem ser tratados como dados
   locais potencialmente sensíveis.

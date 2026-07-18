@@ -39,6 +39,22 @@ Strings que contêm objeto/array JSON são decodificadas recursivamente. Falhas
 preservam a string original. Campos e arquivos não compreendidos permanecem em
 `unknown` ou `raw`, com origem lógica relativa.
 
+## Números
+
+- inteiros JSON são lidos como `int`, preservando contagens, índices e
+  identificadores numéricos;
+- frações JSON são lidas como `Decimal`;
+- dinheiro, preços e saldos permanecem `Decimal` durante normalização e
+  cálculos;
+- quantidades são `Decimal` por poderem ser fracionárias, mas não são tratadas
+  semanticamente como dinheiro;
+- métricas não monetárias podem ser convertidas para `float` quando
+  fracionárias;
+- `NaN`, `Infinity` e `-Infinity` são rejeitados como JSON inválido.
+
+Essa estratégia preserva exatamente valores como `9007199254740993`, `0.10` e
+`12345678901234567890.99`.
+
 ## Sinais de campanha
 
 `CampaignId` observado em `Game.json` é a única identidade forte atualmente.

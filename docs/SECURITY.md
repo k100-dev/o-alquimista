@@ -15,11 +15,20 @@
 
 - caminhos absolutos, UNC e drives Windows;
 - segmentos `..` e ADS;
+- dispositivos reservados do Windows, sem distinção entre maiúsculas e
+  minúsculas: `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`,
+  `CONIN$` e `CONOUT$`;
 - links simbólicos e arquivos especiais;
 - duplicatas e colisões de caixa;
 - destinos resolvidos fora do temporário;
 - arquivos fora da raiz lógica do save;
 - profundidade maior que 16.
+
+A validação de dispositivos ocorre por componente antes da extração. Pontos e
+espaços finais são removidos para a comparação, e o nome anterior à primeira
+extensão é avaliado. Assim, variantes como `CON.txt`, `NUL.dat`,
+`folder/COM1.json` e `CONOUT$.txt` são bloqueadas sem rejeitar nomes comuns como
+`CONTAINER.json`, `COM10.json` ou `myCON.txt`.
 
 ## Limites
 
