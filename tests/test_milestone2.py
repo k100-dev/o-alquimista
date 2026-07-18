@@ -44,6 +44,8 @@ from o_alquimista.identity import (
     fingerprint_archive,
     resolve_campaign_identity,
 )
+from o_alquimista.json_codec import dumps as json_dumps
+from o_alquimista.json_codec import loads as json_loads
 from o_alquimista.memory_reports import build_analysis_markdown
 from o_alquimista.parser import snapshot_and_fingerprint_from_zip, snapshot_from_zip
 from o_alquimista.report import build_markdown
@@ -416,11 +418,11 @@ class EvidenceAndAnalysisTests(unittest.TestCase):
             missing_files.pop("Players/synthetic-player/Inventory.json")
             create_save_zip(observed_archive, files=observed_files)
             create_save_zip(missing_archive, files=missing_files)
-            before = json.loads(
-                json.dumps(snapshot_from_zip(observed_archive).to_dict())
+            before = json_loads(
+                json_dumps(snapshot_from_zip(observed_archive).to_dict())
             )
-            after = json.loads(
-                json.dumps(snapshot_from_zip(missing_archive).to_dict())
+            after = json_loads(
+                json_dumps(snapshot_from_zip(missing_archive).to_dict())
             )
 
             comparison = compare_snapshots(
