@@ -419,27 +419,48 @@ def timeline_sort_key(entry: dict[str, Any]) -> tuple[Any, ...]:
 
 
 def _count(snapshot: dict[str, Any], section: str) -> int | None:
+    if not _section_is_observed(snapshot, section):
+        return None
     value = snapshot.get(section)
-    return len(value) if isinstance(value, list) else None
+    return len(value) if isinstance(value, (list, tuple)) else None
 
 
 def _owned_property_count(snapshot: dict[str, Any]) -> int | None:
+    if not _section_is_observed(snapshot, "properties"):
+        return None
     values = snapshot.get("properties")
-    if not isinstance(values, list):
+    if not isinstance(values, (list, tuple)):
         return None
     return sum(
         1 for value in values if isinstance(value, dict) and value.get("owned") is True
     )
 
 
+def _discovered_product_count(snapshot: dict[str, Any]) -> int | None:
+    if not _section_is_observed(snapshot, "products"):
+        return None
+    products = snapshot.get("products")
+    if not isinstance(products, dict):
+        return None
+    discovered = products.get("discovered")
+    return len(discovered) if isinstance(discovered, (list, tuple)) else None
+
+
 def detect_milestones(
-    previous: dict[str, Any] | None,
+    history: Iterable[dict[str, Any]] | dict[str, Any] | None,
     current: dict[str, Any],
     *,
     campaign_id: str,
     current_snapshot_id: str,
     previous_snapshot_id: str | None,
 ) -> tuple[DetectedMilestone, ...]:
+    if history is None:
+        historical_snapshots: tuple[dict[str, Any], ...] = ()
+    elif isinstance(history, dict):
+        historical_snapshots = (history,)
+    else:
+        historical_snapshots = tuple(history)
+    previous = historical_snapshots[-1] if historical_snapshots else None
     milestones: list[DetectedMilestone] = []
 
     def first_observed(
@@ -447,13 +468,16 @@ def detect_milestones(
         title: str,
         description: str,
         current_count: int | None,
-        previous_count: int | None,
+        historical_counts: Iterable[int | None],
         source_file: str,
         source_path: str,
     ) -> None:
         if current_count is None or current_count <= 0:
             return
-        if previous is not None and previous_count != 0:
+        if any(
+            count is not None and count > 0
+            for count in historical_counts
+        ):
             return
         evidence = observed_evidence(
             source_file=source_file,
@@ -483,7 +507,10 @@ def detect_milestones(
         "Primeira propriedade observada",
         "Ao menos uma propriedade possuída foi observada.",
         _owned_property_count(current),
-        _owned_property_count(previous) if previous else None,
+        (
+            _owned_property_count(snapshot)
+            for snapshot in historical_snapshots
+        ),
         "Properties/*.json",
         "IsOwned",
     )
@@ -492,7 +519,10 @@ def detect_milestones(
         "Primeiro veículo observado",
         "Ao menos um veículo foi observado.",
         _count(current, "vehicles"),
-        _count(previous, "vehicles") if previous else None,
+        (
+            _count(snapshot, "vehicles")
+            for snapshot in historical_snapshots
+        ),
         "Vehicles.json",
         "Vehicles",
     )
@@ -501,26 +531,22 @@ def detect_milestones(
         "Primeiro funcionário observado",
         "Ao menos um funcionário foi observado.",
         _count(current, "employees"),
-        _count(previous, "employees") if previous else None,
+        (
+            _count(snapshot, "employees")
+            for snapshot in historical_snapshots
+        ),
         "Properties/*.json",
         "Employees",
-    )
-    products = current.get("products")
-    previous_products = previous.get("products") if previous else None
-    current_product_count = (
-        len(products.get("discovered", [])) if isinstance(products, dict) else None
-    )
-    previous_product_count = (
-        len(previous_products.get("discovered", []))
-        if isinstance(previous_products, dict)
-        else None
     )
     first_observed(
         "first_product",
         "Primeiro produto observado",
         "Ao menos um produto descoberto foi observado.",
-        current_product_count,
-        previous_product_count,
+        _discovered_product_count(current),
+        (
+            _discovered_product_count(snapshot)
+            for snapshot in historical_snapshots
+        ),
         "Products.json",
         "DiscoveredProducts",
     )

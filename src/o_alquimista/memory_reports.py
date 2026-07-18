@@ -150,7 +150,8 @@ def build_analysis_markdown(analysis: CampaignAnalysis) -> str:
         lines.append("- Nenhuma regra acionada.")
     lines += ["", "## Marcos", ""]
     lines.extend(
-        f"- **{milestone.title}** — {milestone.description}"
+        f"- **{milestone.title}** — {milestone.description} "
+        f"(primeiro snapshot: `{milestone.first_seen_snapshot_id}`)"
         for milestone in analysis.milestones
     )
     if not analysis.milestones:

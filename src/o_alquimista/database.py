@@ -737,7 +737,7 @@ class AlquimistaDatabase:
         entries: list[dict[str, Any]],
     ) -> dict[str, tuple[DetectedMilestone, ...]]:
         detected: dict[str, tuple[DetectedMilestone, ...]] = {}
-        previous_snapshot: dict[str, Any] | None = None
+        historical_snapshots: list[dict[str, Any]] = []
         previous_snapshot_id: str | None = None
         for entry in entries:
             snapshot_id = str(entry["snapshot_id"])
@@ -757,7 +757,7 @@ class AlquimistaDatabase:
             )
             current_snapshot = cls._snapshot_json(connection, snapshot_id)
             milestones = detect_milestones(
-                previous_snapshot,
+                historical_snapshots,
                 current_snapshot,
                 campaign_id=campaign_id,
                 current_snapshot_id=snapshot_id,
@@ -786,9 +786,39 @@ class AlquimistaDatabase:
                 ),
             )
             detected[snapshot_id] = milestones
-            previous_snapshot = current_snapshot
+            historical_snapshots.append(current_snapshot)
             previous_snapshot_id = snapshot_id
         return detected
+
+    @classmethod
+    def _rebuild_campaign_milestones(
+        cls,
+        connection: sqlite3.Connection,
+        campaign_id: str,
+        milestones: Iterable[DetectedMilestone],
+        created_at: str,
+    ) -> None:
+        connection.execute(
+            "DELETE FROM campaign_milestones WHERE campaign_id = ?",
+            (campaign_id,),
+        )
+        connection.executemany(
+            """
+            INSERT INTO campaign_milestones
+                (id, campaign_id, snapshot_id, payload_json, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    milestone.milestone_id,
+                    campaign_id,
+                    milestone.first_seen_snapshot_id,
+                    cls._json(milestone.to_dict()),
+                    created_at,
+                )
+                for milestone in milestones
+            ],
+        )
 
     @staticmethod
     def _snapshot_json(
@@ -966,10 +996,20 @@ class AlquimistaDatabase:
                 campaign_identity.campaign_id,
                 timeline,
             )
-            self._refresh_timeline_milestones(
+            milestones_by_snapshot = self._refresh_timeline_milestones(
                 connection,
                 campaign_identity.campaign_id,
                 timeline,
+            )
+            self._rebuild_campaign_milestones(
+                connection,
+                campaign_identity.campaign_id,
+                (
+                    milestone
+                    for milestones in milestones_by_snapshot.values()
+                    for milestone in milestones
+                ),
+                imported_at,
             )
 
             evidence = (
@@ -1194,12 +1234,12 @@ class AlquimistaDatabase:
             for entry in timeline
         ]
         milestones: list[DetectedMilestone] = []
+        historical_snapshots: list[dict[str, Any]] = []
         for index, (entry, snapshot) in enumerate(zip(timeline, snapshots, strict=True)):
             previous_entry = timeline[index - 1] if index > 0 else None
-            previous_snapshot = snapshots[index - 1] if index > 0 else None
             milestones.extend(
                 detect_milestones(
-                    previous_snapshot,
+                    historical_snapshots,
                     snapshot,
                     campaign_id=campaign_id,
                     current_snapshot_id=entry["snapshot_id"],
@@ -1208,6 +1248,7 @@ class AlquimistaDatabase:
                     ),
                 )
             )
+            historical_snapshots.append(snapshot)
         return build_campaign_analysis(
             campaign_id,
             timeline,
@@ -1226,13 +1267,12 @@ class AlquimistaDatabase:
         if latest_snapshot_id is None:
             return analysis
         with self._connection(immediate=True) as connection:
-            for milestone in analysis.milestones:
-                self._persist_detected_milestones(
-                    connection,
-                    milestone.first_seen_snapshot_id,
-                    (milestone,),
-                    now,
-                )
+            self._rebuild_campaign_milestones(
+                connection,
+                campaign_id,
+                analysis.milestones,
+                now,
+            )
             self._persist_strategic_recommendations(
                 connection,
                 latest_snapshot_id,
@@ -1265,12 +1305,10 @@ class AlquimistaDatabase:
         with self._connection() as connection:
             rows = connection.execute(
                 """
-                SELECT m.payload_json
-                FROM milestones AS m
-                JOIN snapshots AS s ON s.id = m.snapshot_id
-                JOIN imports AS i ON i.id = s.import_id
-                WHERE i.campaign_id = ?
-                ORDER BY m.id
+                SELECT payload_json
+                FROM campaign_milestones
+                WHERE campaign_id = ?
+                ORDER BY id
                 """,
                 (campaign_id,),
             ).fetchall()
