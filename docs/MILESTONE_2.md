@@ -10,7 +10,7 @@
 - marcos determinísticos;
 - recomendações locais baseadas em regras identificadas;
 - CLI e relatórios JSON/Markdown;
-- migração SQLite v1 para v2.
+- migração SQLite v1/v2 para v3.
 
 ## Marcos implementados
 
@@ -20,20 +20,28 @@
 - primeiro produto descoberto;
 - aumento de patrimônio de pelo menos 1.000 e 25% entre snapshots.
 
-IDs de marcos “primeiro” dependem de campanha e tipo, evitando duplicação.
+IDs de marcos “primeiro” dependem de campanha e tipo. A detecção consulta todo
+o histórico anterior, não apenas o snapshot imediatamente anterior. Após uma
+importação retroativa, a timeline e todos os marcos derivados da campanha são
+recalculados atomicamente, reposicionando `first_seen_snapshot_id`.
 
 ## Identidade de campanha
 
-| Estratégia | Confiança | Limitação |
+| Estado | Evidência | Comportamento |
 |---|---|---|
-| `CampaignId` nativo em `Game.json` | alta | depende de campo realmente presente |
-| `GameId`/`SaveId` em `Game.json` | média | nome do campo ainda pode ser ambíguo |
-| organização + player protegidos | média | campanhas distintas podem compartilhar sinais |
-| sinal interno parcial | baixa | maior risco de falso positivo |
-| fallback pelo arquivo | baixa | não agrupa exports diferentes |
+| `resolved` | `CampaignId` nativo em `Game.json` | exports com o mesmo ID protegido compartilham campanha |
+| `candidate` | `GameId`, `SaveId`, organização ou player | campanha provisória própria; coincidências geram associação candidata |
+| `unresolved` | nenhuma evidência de identidade | campanha provisória própria e confiança indisponível |
+| `explicitly_linked` | vinculação explícita | reservado; não há consolidação automática |
 
 O valor bruto de um ID usado na resolução não é incluído na evidência de
-identidade.
+identidade. O SHA-256 integral do ZIP identifica somente a importação e nunca
+participa do `campaign_id`. Nome, caminho e horário do arquivo também não
+participam.
+
+`alquimista campaign associations` expõe relações candidatas e seus sinais
+protegidos. Essas relações são informativas: não compartilham timeline,
+snapshots ou marcos entre as campanhas envolvidas.
 
 ## Linha do tempo
 
@@ -45,4 +53,5 @@ disponíveis prevalecem; o ID resolve empates deterministicamente.
 
 Campos monetários usam decimal exato. Percentual só existe quando a base
 anterior é numérica e diferente de zero. Seções ausentes permanecem
-`unknown`; valores não numéricos são `not_comparable`.
+`unknown`; valores não numéricos são `not_comparable`. Seções opcionais
+distinguem fonte observada vazia de `missing`, `invalid` e `unsupported`.

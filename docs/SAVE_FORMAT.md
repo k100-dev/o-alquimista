@@ -29,17 +29,24 @@ Arquivos opcionais observados incluem `Game.json`,
 `Players/*/Inventory.json`, `WorldStorageEntities.json`,
 `Properties/*.json`, `Businesses/*.json`, `NPCs.json` e `Vehicles.json`.
 
+Para players, inventário, armazenamento mundial, propriedades, negócios, NPCs,
+funcionários e veículos, o snapshot registra `availability`: `observed`,
+`missing`, `invalid` ou `unsupported`. Um diretório/arquivo presente e válido
+com lista vazia é `observed`; ausência e conteúdo inválido não são convertidos
+em zero.
+
 Strings que contêm objeto/array JSON são decodificadas recursivamente. Falhas
 preservam a string original. Campos e arquivos não compreendidos permanecem em
 `unknown` ou `raw`, com origem lógica relativa.
 
 ## Sinais de campanha
 
-Campos desconhecidos com nomes compatíveis com IDs nativos de campanha são
-considerados somente como sinal observável e têm o valor protegido por SHA-256.
-Na ausência deles, nome de organização e diretórios de player podem compor um
-fingerprint protegido. Valores financeiros, dia e inventário não definem
-campanha.
+`CampaignId` observado em `Game.json` é a única identidade forte atualmente.
+`GameId`, `SaveId`, nome de organização e diretórios de player são sinais
+protegidos por SHA-256 para associações candidatas; não consolidam campanhas.
+Na ausência de identidade forte, cada export recebe uma campanha provisória
+independente. O fingerprint do ZIP, valores financeiros, dia, inventário, nome,
+caminho e horário do arquivo não definem campanha.
 
 ## Privacidade
 

@@ -26,3 +26,18 @@ campanha são protegidos por hash e não aparecem como valor bruto.
 Inferências e recomendações nunca são apresentadas como fatos. Recomendações
 também carregam evidência contraditória, informação ausente, regra,
 justificativa e limitações.
+
+## Disponibilidade de seções
+
+Cada coleção opcional normalizada informa um estado independente:
+
+- `observed`: a fonte existe, é válida e pode conter zero elementos;
+- `missing`: a fonte esperada não foi encontrada;
+- `invalid`: a fonte existe, mas não pôde ser validada;
+- `unsupported`: o formato foi reconhecido como não suportado, quando
+  aplicável.
+
+O estado fica no campo `availability` do snapshot. Comparações, marcos e
+recomendações só usam contagens quando a seção está `observed`. `missing`,
+`invalid` e `unsupported` geram resultado desconhecido ou evidência
+`unavailable`, nunca zero, remoção ou coleção observada vazia.

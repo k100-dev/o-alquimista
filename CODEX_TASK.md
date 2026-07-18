@@ -4,9 +4,11 @@ Preserve a regra central: ZIPs, saves e arquivos do jogo são sempre read-only.
 
 ## Estado
 
-O Milestone 2 adiciona fingerprint SHA-256, deduplicação idempotente, identidade
-de campanha com confiança, evidências explícitas, timeline, comparação segura,
-marcos, recomendações e SQLite versionado.
+O Milestone 2 adiciona fingerprint SHA-256 para deduplicação, identidade
+conservadora com estados explícitos, associações candidatas sem consolidação,
+disponibilidade de seções opcionais, evidências explícitas, timeline,
+comparação segura, marcos históricos reconstruíveis, recomendações e SQLite
+versionado.
 
 ## Próximo objetivo sugerido
 

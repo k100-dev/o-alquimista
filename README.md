@@ -61,6 +61,7 @@ Consultar importações e campanhas:
 alquimista history --database ".\data\alquimista.sqlite3"
 alquimista campaign list --database ".\data\alquimista.sqlite3"
 alquimista campaign history <campaign_id> --database ".\data\alquimista.sqlite3"
+alquimista campaign associations <campaign_id> --database ".\data\alquimista.sqlite3"
 ```
 
 Linha do tempo, comparação e análise:
@@ -89,28 +90,34 @@ alquimista diff before.json after.json --out diff.json
 
 ## Memória e confiança
 
-O arquivo importado recebe um fingerprint SHA-256 integral. A campanha é
-resolvida nesta ordem:
+O arquivo importado recebe um fingerprint SHA-256 integral, usado somente para
+deduplicar a importação. A identidade da campanha possui estado explícito:
 
-1. identificador nativo observado, protegido por hash — confiança alta;
-2. combinação protegida de sinais internos estáveis — confiança média;
-3. sinal interno parcial — confiança baixa;
-4. fallback limitado ao arquivo — confiança baixa e sem promessa de agrupar
-   exports futuros.
+- `resolved`: `CampaignId` nativo observado e protegido por hash;
+- `candidate`: `GameId`, `SaveId`, organização ou players são apenas sinais
+  ambíguos; cada export permanece em uma campanha provisória independente;
+- `unresolved`: não há evidência suficiente e nenhuma confiança de identidade é
+  afirmada;
+- `explicitly_linked`: reservado para uma vinculação explícita futura.
 
-Dinheiro, dia e inventário nunca são usados isoladamente como identidade.
+Associações candidatas registram sinais protegidos compartilhados, mas nunca
+unem campanhas automaticamente. Nome, caminho, horário, dinheiro, dia,
+inventário e o hash do ZIP não definem `campaign_id`.
 Consulte [docs/MILESTONE_2.md](docs/MILESTONE_2.md).
 
 Resultados analíticos separam `observed`, `derived`, `inferred` e
-`unavailable`. Inferências e recomendações sempre carregam confiança,
-justificativa, evidências, limitações e informação ausente. Consulte
+`unavailable`. Coleções opcionais também registram disponibilidade
+`observed`, `missing`, `invalid` ou `unsupported`; ausência e erro nunca
+equivalem a coleção vazia. Inferências e recomendações sempre carregam
+confiança, justificativa, evidências, limitações e informação ausente. Consulte
 [docs/EVIDENCE_MODEL.md](docs/EVIDENCE_MODEL.md).
 
 ## Persistência
 
-O SQLite v2 possui campanhas, fingerprints, importações, snapshots, timeline,
-evidências, marcos, recomendações e relações entre snapshots. A inicialização é
-idempotente e migra o schema do Milestone 1 sem apagar registros. Consulte
+O SQLite v3 possui campanhas, sinais e associações candidatas, fingerprints,
+importações, snapshots, timeline, evidências, marcos reconstruíveis,
+recomendações e relações entre snapshots. A inicialização é transacional e
+idempotente, migra schemas v1 e v2 e preserva snapshots anteriores. Consulte
 [docs/DATABASE_SCHEMA.md](docs/DATABASE_SCHEMA.md).
 
 ## Testes
@@ -125,8 +132,12 @@ locais.
 
 ## Limitações conhecidas
 
-- A ausência de um ID nativo pode causar falso agrupamento ou separação de
-  campanhas; a confiança e a estratégia ficam explícitas.
+- Sem `CampaignId` comprovado, exports permanecem separados. Associações
+  candidatas precisam de revisão e ainda não há comando de consolidação
+  explícita.
+- Bancos v2 podem conter agrupamentos históricos feitos por sinais fracos; a
+  migração os marca como candidatos, mas não tenta separar dados anteriores sem
+  evidência suficiente.
 - Despesas, fornecedores, clientes, atividades e capacidade ainda podem ficar
   indisponíveis.
 - Regras de liquidez e dependência operacional são heurísticas locais,
