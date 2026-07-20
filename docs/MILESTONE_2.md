@@ -1,5 +1,11 @@
 # Milestone 2 — A Memória do Alquimista
 
+## Status
+
+Concluído na versão 0.4.0 e aprovado tecnicamente, com validações reais
+complementares documentadas no
+[Termo de Aceite Técnico](MILESTONE_2_ACCEPTANCE.md).
+
 ## Entregas
 
 - fingerprint SHA-256 integral e determinístico;

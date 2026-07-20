@@ -55,7 +55,8 @@ IDs de evidência, marco, comparação e recomendação usam entradas canônicas
 
 Listas oriundas do filesystem e artefatos analíticos possuem ordenação
 explícita. JSON usa chaves ordenadas. A data de importação fica no banco e só é
-fallback da timeline quando tempo interno e progressão não resolvem a ordem.
+metadado operacional; nunca participa da ordenação analítica. Empates após os
+sinais internos são resolvidos por `snapshot_id` estável.
 
 ## Comparação
 

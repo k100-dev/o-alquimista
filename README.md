@@ -6,6 +6,12 @@ importações isoladas em campanhas com identidade explicável, deduplicação p
 conteúdo, linha do tempo, comparação, evidências, marcos e recomendações
 determinísticas.
 
+O Milestone 2 está concluído na versão **0.4.0**. A entrega inclui memória
+persistente de campanhas, timeline determinística, comparação e análise,
+associações candidatas sem consolidação automática e precisão monetária com
+`Decimal`, preservando a operação estritamente read-only. Consulte o
+[Termo de Aceite Técnico](docs/MILESTONE_2_ACCEPTANCE.md).
+
 Não há interface gráfica nem chamadas de rede neste milestone.
 
 ## Segurança read-only
