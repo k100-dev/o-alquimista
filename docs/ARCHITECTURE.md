@@ -2,112 +2,92 @@
 
 ## Princípios
 
-1. **Read-only na origem:** ZIPs e diretórios de save são apenas lidos.
-2. **Extração efêmera:** conteúdo de ZIP existe somente dentro de
-   `TemporaryDirectory`.
-3. **Observação antes de interpretação:** campos conhecidos são normalizados;
-   os demais são preservados como `unknown` ou `raw`.
-4. **Rastreabilidade:** valores normalizados registram arquivo e campo de origem.
-5. **Biblioteca padrão primeiro:** ZIP, JSON, SQLite, CLI e modelos usam apenas
-   módulos da biblioteca padrão do Python 3.11+.
+1. origem read-only e extração efêmera;
+2. fingerprint de conteúdo somente para deduplicação; identidade de campanha
+   somente por evidência própria do save;
+3. observação separada de cálculo e inferência;
+4. resultados determinísticos;
+5. confiança e limitações explícitas;
+6. transações atômicas e schema migrável;
+7. biblioteca padrão primeiro.
 
-## Fluxo
+## Fluxo de importação
 
 ```text
-Export Save ZIP (somente leitura)
-        |
-        v
-validação do arquivo e das entradas
-        |
-        v
-extração em diretório temporário
-        |
-        v
-detecção da raiz pelos JSONs essenciais
-        |
-        v
-modelos de domínio tipados
-        |
-        +----> snapshot.json + report.md
-        |
-        +----> campanhas/importações/snapshots no SQLite
-                     |
-                     +----> milestones/recomendações
+ZIP read-only
+  -> preflight e limites
+  -> SHA-256 em blocos
+  -> extração temporária segura
+  -> detecção/validação da raiz
+  -> snapshot normalizado
+  -> identidade de campanha + evidências
+  -> transação SQLite
+       -> deduplicação
+       -> campanha/import/snapshot
+       -> sinais e associações candidatas
+       -> timeline/evidências/relações
+       -> reconstrução dos marcos da campanha
 ```
 
 ## Módulos
 
-### `o_alquimista.archive`
+- `archive.py`: limites, validação de entradas, extração e escopo lógico;
+- `json_codec.py`: leitura decimal, rejeição de não finitos, serialização
+  canônica e restauração de snapshots persistidos;
+- `identity.py`: `ArchiveFingerprint` e `CampaignIdentity`;
+- `parser.py`: normalização read-only e preservação `raw/unknown`;
+- `memory_models.py`: evidência, timeline, comparação, marco e recomendação;
+- `evidence.py`: fábricas determinísticas das quatro categorias;
+- `analysis.py`: comparação, ordenação, marcos e regras de recomendação;
+- `database.py`: schema v3, migração v1/v2, deduplicação e consultas;
+- `memory_reports.py`: Markdown com seções epistemológicas separadas;
+- `cli.py`: adaptação de argumentos e apresentação;
+- `schedule_intelligence`: delegação de compatibilidade, sem lógica duplicada.
 
-Valida existência e assinatura ZIP. Antes de escrever qualquer membro no
-diretório temporário, normaliza separadores e rejeita caminhos absolutos,
-componentes `..`, drives, links simbólicos e destinos fora da raiz temporária.
-Não usa `extractall`.
+## Identidade e determinismo
 
-Antes da extração, também limita quantidade de entradas, tamanho individual,
-tamanho total descompactado, comprimento de nomes e razão de compressão. A
-cópia é feita em blocos e revalida os limites durante a descompressão.
+O fingerprint é SHA-256 dos bytes integrais do ZIP e só identifica uma
+importação. O snapshot não contém timestamp da operação nem caminho absoluto.
+IDs de import/snapshot são derivados do digest. Uma campanha `resolved` deriva
+seu ID de `CampaignId` protegido; campanhas `candidate` e `unresolved` recebem
+IDs provisórios independentes, sem depender do ZIP, nome, caminho ou horário.
+IDs de evidência, marco, comparação e recomendação usam entradas canônicas.
 
-A raiz do save é a pasta mais rasa que contém simultaneamente:
-`Money.json`, `Products.json`, `Time.json` e `Rank.json`. Seu nome não participa
-da decisão. Empates na mesma profundidade são rejeitados como ambíguos.
+Listas oriundas do filesystem e artefatos analíticos possuem ordenação
+explícita. JSON usa chaves ordenadas. A data de importação fica no banco e só é
+metadado operacional; nunca participa da ordenação analítica. Empates após os
+sinais internos são resolvidos por `snapshot_id` estável.
 
-### `o_alquimista.parser`
+## Comparação
 
-Decodifica JSON e strings que contêm JSON, reproduz o escopo analítico do
-protótipo e agrega inventários de players, armazenamento mundial e
-propriedades. `read_save_model` mantém suporte read-only a diretórios para
-compatibilidade; `snapshot_from_zip` é a API principal.
+O comparador recebe dois snapshots e suas campanhas. Campanhas diferentes
+geram erro, salvo override explícito. Dinheiro usa `Decimal` e é serializado
+como texto decimal. Campo ausente vira `unknown` ou `not_comparable`, nunca
+zero. Coleções distinguem adição, remoção, alteração e invariância somente
+quando ambos os snapshots registram a seção como `observed`; nos demais estados
+o resultado é `unknown`.
 
-Arquivos JSON não consumidos pelo normalizador são preservados integralmente no
-campo `unknown` do snapshot. Campos não mapeados de arquivos consumidos são
-preservados no modelo correspondente.
+## Codec numérico
 
-### `o_alquimista.models`
+O JSON do save é lido com `parse_float=Decimal` e `parse_int=int`. Essa escolha
+preserva frações sem erro binário e mantém contagens e índices como inteiros.
+Campos monetários, preços, saldos de itens e quantidades são normalizados
+explicitamente para `Decimal`; métricas não monetárias podem continuar como
+`int` ou `float`.
 
-Dataclasses imutáveis e com `slots` representam metadata, financeiro, tempo,
-progressão, produtos, inventários, propriedades, NPCs, funcionários, veículos,
-campos desconhecidos, milestones e recomendações.
+Toda serialização interna passa pelo mesmo codec. `Decimal` é persistido como
+string decimal sem expoente, sem conversão intermediária para `float`.
+`allow_nan=False` e a rejeição de constantes JSON impedem `NaN`, `Infinity` e
+`-Infinity`. A leitura de snapshots antigos restaura os campos decimais
+conhecidos, portanto não exige alteração do schema SQLite v3.
 
-`DataOrigin` aponta para o caminho relativo do arquivo e para o campo observado.
-`NormalizedSnapshot.to_dict()` gera uma estrutura JSON e mantém a chave `game`
-necessária ao diff e ao relatório legados.
+## Recomendações
 
-### `o_alquimista.database`
+`RECOMMENDATION_RULES` centraliza regras identificadas:
 
-O schema SQLite possui chaves estrangeiras e transações curtas:
+- `liquidity.minimum-buffer.v1`;
+- `operations.owner-dependency.v1`;
+- `memory.collect-baseline.v1`.
 
-- `campaigns`: agrupamento local pela origem do ZIP;
-- `imports`: hash SHA-256, raiz detectada e instante da importação;
-- `snapshots`: JSON normalizado versionado;
-- `milestones`: payload do modelo associado ao snapshot;
-- `recommendations`: payload do modelo associado ao snapshot.
-
-Conexões são fechadas explicitamente, inclusive no Windows.
-
-O instante real da operação pertence às tabelas de importação. Ele não integra
-o snapshot normalizado, para que o mesmo ZIP produza JSON idêntico. O snapshot
-registra somente o nome do ZIP, nunca seu caminho absoluto local.
-
-### `o_alquimista.cli`
-
-Expõe `import`, `snapshot`, `history` e o `diff` preservado. Erros esperados
-retornam status 2 sem traceback. O alias `schedule-intel` e os módulos
-`schedule_intelligence` existem somente como ponte de migração.
-
-No modo legado de leitura de diretório, a CLI bloqueia qualquer saída igual ou
-interna à raiz do save. O banco também não pode compartilhar o caminho do ZIP.
-
-## Limites de confiança
-
-Nomes como `OnlineBalance`, `ElapsedDays` e `DiscoveredProducts` são
-normalizados porque a própria chave fornece evidência direta. Estruturas sem
-documentação ou evidência suficiente não recebem rótulos estratégicos. O
-snapshot pode conter dados redundantes de propósito: preservar evidência é mais
-importante do que compactar prematuramente.
-
-## Evolução
-
-Mudanças futuras devem versionar `metadata.schema_version`, adicionar migrações
-SQLite e manter leitores para snapshots anteriores. Uma interface gráfica deve
-consumir as APIs do domínio, nunca acessar o ZIP ou o save diretamente.
+As regras produzem recomendação, não fato, e incluem evidências, confiança,
+informações ausentes e limitações.

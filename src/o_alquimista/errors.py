@@ -27,3 +27,19 @@ class AmbiguousSaveError(InvalidArchiveError):
 
 class SaveDataError(AlquimistaError):
     """Um arquivo do save não pôde ser interpretado."""
+
+
+class CampaignMismatchError(AlquimistaError):
+    """Snapshots de campanhas diferentes foram comparados sem override."""
+
+
+class RecordNotFoundError(AlquimistaError):
+    """Uma campanha ou snapshot solicitado não existe."""
+
+
+class UnsafeProvenanceError(AlquimistaError):
+    """Um caminho de proveniência não é lógico, relativo e seguro."""
+
+
+class UnsupportedDatabaseVersionError(AlquimistaError):
+    """O banco foi criado por uma versão mais nova do aplicativo."""

@@ -29,6 +29,7 @@ MAX_ARCHIVE_ENTRIES = 5_000
 MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
 MAX_CENTRAL_DIRECTORY_BYTES = 16 * 1024 * 1024
 MAX_MEMBER_NAME_LENGTH = 1_024
+MAX_DIRECTORY_DEPTH = 16
 MAX_MEMBER_UNCOMPRESSED_BYTES = 32 * 1024 * 1024
 MAX_TOTAL_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
 MAX_COMPRESSION_RATIO = 200.0
@@ -37,6 +38,46 @@ COPY_CHUNK_BYTES = 1024 * 1024
 EOCD_SIGNATURE = b"PK\x05\x06"
 EOCD = struct.Struct("<4s4H2LH")
 MAX_ZIP_COMMENT_BYTES = 65_535
+WINDOWS_RESERVED_COMPONENTS = frozenset(
+    {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "CONIN$",
+        "CONOUT$",
+        *(f"COM{index}" for index in range(1, 10)),
+        *(f"LPT{index}" for index in range(1, 10)),
+    }
+)
+SUPPORTED_COMPRESSION_METHODS = frozenset(
+    method
+    for method in (
+        zipfile.ZIP_STORED,
+        zipfile.ZIP_DEFLATED,
+        zipfile.ZIP_BZIP2,
+        zipfile.ZIP_LZMA,
+        getattr(zipfile, "ZIP_ZSTANDARD", None),
+    )
+    if method is not None
+)
+EXPECTED_ZIP_ERRORS = (
+    zipfile.BadZipFile,
+    zipfile.LargeZipFile,
+    RuntimeError,
+    NotImplementedError,
+    EOFError,
+)
+
+
+def _invalid_zip_failure(exc: BaseException) -> InvalidArchiveError:
+    if isinstance(exc, RuntimeError):
+        message = "O ZIP contém entrada criptografada ou ilegível."
+    elif isinstance(exc, NotImplementedError):
+        message = "O ZIP usa um método de compressão não suportado."
+    else:
+        message = "O ZIP está corrompido ou não pôde ser lido integralmente."
+    return InvalidArchiveError(message)
 
 
 def _preflight_central_directory(path: Path) -> None:
@@ -95,9 +136,28 @@ def validate_archive(archive_path: Path) -> Path:
     if path.stat().st_size > MAX_ARCHIVE_BYTES:
         raise ArchiveLimitError(f"O ZIP excede {MAX_ARCHIVE_BYTES} bytes.")
     _preflight_central_directory(path)
-    if not zipfile.is_zipfile(path):
+    try:
+        is_zip = zipfile.is_zipfile(path)
+    except EXPECTED_ZIP_ERRORS as exc:
+        raise _invalid_zip_failure(exc) from exc
+    if not is_zip:
         raise InvalidArchiveError(f"O arquivo não é um ZIP válido: {archive_path.name}")
     return path
+
+
+def archive_member_count(archive_path: Path) -> int:
+    """Conta entradas convertendo falhas esperadas de zipfile em erro de domínio."""
+    try:
+        with zipfile.ZipFile(archive_path, mode="r") as archive:
+            return len(archive.infolist())
+    except EXPECTED_ZIP_ERRORS as exc:
+        raise _invalid_zip_failure(exc) from exc
+
+
+def _is_windows_reserved_component(component: str) -> bool:
+    normalized = component.rstrip(" .")
+    base_name = normalized.split(".", 1)[0].rstrip(" .")
+    return base_name.upper() in WINDOWS_RESERVED_COMPONENTS
 
 
 def _safe_relative_path(info: zipfile.ZipInfo) -> Path:
@@ -114,10 +174,30 @@ def _safe_relative_path(info: zipfile.ZipInfo) -> Path:
         raise UnsafeArchiveError(f"Entrada absoluta bloqueada: {info.filename!r}")
     if any(part in {"", ".", ".."} for part in member.parts):
         raise UnsafeArchiveError(f"Path traversal bloqueado: {info.filename!r}")
+    reserved = next(
+        (
+            part
+            for part in member.parts
+            if _is_windows_reserved_component(part)
+        ),
+        None,
+    )
+    if reserved is not None:
+        raise UnsafeArchiveError(
+            f"Componente reservado do Windows bloqueado: {reserved!r}"
+        )
+    directory_depth = len(member.parts) if info.is_dir() else len(member.parts) - 1
+    if directory_depth > MAX_DIRECTORY_DEPTH:
+        raise ArchiveLimitError(
+            f"Uma entrada excede a profundidade máxima {MAX_DIRECTORY_DEPTH}."
+        )
 
     unix_mode = info.external_attr >> 16
     if stat.S_ISLNK(unix_mode):
         raise UnsafeArchiveError(f"Link simbólico bloqueado: {info.filename!r}")
+    file_type = stat.S_IFMT(unix_mode)
+    if file_type and not (stat.S_ISREG(unix_mode) or stat.S_ISDIR(unix_mode)):
+        raise UnsafeArchiveError(f"Arquivo especial bloqueado: {info.filename!r}")
     return Path(*member.parts)
 
 
@@ -129,6 +209,12 @@ def _validate_resource_limits(members: list[zipfile.ZipInfo]) -> None:
 
     total_uncompressed = 0
     for info in members:
+        if info.flag_bits & 0x1:
+            raise InvalidArchiveError("O ZIP contém entrada criptografada.")
+        if info.compress_type not in SUPPORTED_COMPRESSION_METHODS:
+            raise InvalidArchiveError(
+                "O ZIP usa um método de compressão não suportado."
+            )
         if info.is_dir():
             continue
         if info.file_size < 0 or info.compress_size < 0:
@@ -173,10 +259,23 @@ def _copy_member_limited(
 def extract_archive_safely(archive_path: Path, destination: Path) -> None:
     """Extrai membros individualmente após validar todos os caminhos."""
     destination = destination.resolve()
-    with zipfile.ZipFile(archive_path, mode="r") as archive:
-        members = archive.infolist()
+    try:
+        archive_context = zipfile.ZipFile(archive_path, mode="r")
+    except EXPECTED_ZIP_ERRORS as exc:
+        raise _invalid_zip_failure(exc) from exc
+    with archive_context as archive:
+        try:
+            members = archive.infolist()
+        except EXPECTED_ZIP_ERRORS as exc:
+            raise _invalid_zip_failure(exc) from exc
         _validate_resource_limits(members)
         relative_paths = [_safe_relative_path(info) for info in members]
+        normalized_names = [
+            relative_path.as_posix().casefold()
+            for relative_path in relative_paths
+        ]
+        if len(normalized_names) != len(set(normalized_names)):
+            raise UnsafeArchiveError("O ZIP contém entradas duplicadas ou ambíguas.")
         total_written = 0
 
         for info, relative_path in zip(members, relative_paths, strict=True):
@@ -189,12 +288,19 @@ def extract_archive_safely(archive_path: Path, destination: Path) -> None:
                 target.mkdir(parents=True, exist_ok=True)
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
-            with archive.open(info, mode="r") as source, target.open("xb") as output:
-                member_written, total_written = _copy_member_limited(
-                    source,
-                    output,
-                    total_written=total_written,
-                )
+            try:
+                source_context = archive.open(info, mode="r")
+            except EXPECTED_ZIP_ERRORS as exc:
+                raise _invalid_zip_failure(exc) from exc
+            with source_context as source, target.open("xb") as output:
+                try:
+                    member_written, total_written = _copy_member_limited(
+                        source,
+                        output,
+                        total_written=total_written,
+                    )
+                except EXPECTED_ZIP_ERRORS as exc:
+                    raise _invalid_zip_failure(exc) from exc
                 if member_written != info.file_size:
                     raise InvalidArchiveError(
                         "O tamanho extraído não corresponde ao declarado pelo ZIP."
@@ -233,6 +339,18 @@ def detect_save_root(extracted_dir: Path) -> Path:
     return shallowest[0]
 
 
+def validate_extracted_scope(extracted_dir: Path, save_root: Path) -> None:
+    """Rejeita arquivos que não pertençam à raiz lógica detectada."""
+    extracted_dir = extracted_dir.resolve()
+    save_root = save_root.resolve()
+    for path in extracted_dir.rglob("*"):
+        if path.is_file() and not path.resolve().is_relative_to(save_root):
+            relative = path.relative_to(extracted_dir).as_posix()
+            raise UnsafeArchiveError(
+                f"Arquivo fora da raiz lógica do save bloqueado: {relative!r}"
+            )
+
+
 @contextmanager
 def extracted_save(archive_path: Path) -> Iterator[tuple[Path, str]]:
     """Disponibiliza uma raiz de save temporária e a remove ao sair do contexto."""
@@ -241,5 +359,6 @@ def extracted_save(archive_path: Path) -> Iterator[tuple[Path, str]]:
         temporary_dir = Path(temporary).resolve()
         extract_archive_safely(archive, temporary_dir)
         root = detect_save_root(temporary_dir)
+        validate_extracted_scope(temporary_dir, root)
         relative_root = root.relative_to(temporary_dir).as_posix()
         yield root, relative_root

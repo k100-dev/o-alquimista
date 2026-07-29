@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
+
+from .json_codec import decimal_text, to_finite_decimal
 
 
 def money(value: Any) -> str:
-    return f"${float(value or 0):,.2f}"
+    decimal = to_finite_decimal(value)
+    if decimal is None:
+        return "indisponível"
+    return f"${decimal:,.2f}"
 
 
 def build_markdown(snapshot: dict[str, Any]) -> str:
@@ -20,8 +26,12 @@ def build_markdown(snapshot: dict[str, Any]) -> str:
         f"- Organização: `{game.get('organisation_name') or 'não informada'}`",
         f"- Dia no jogo: **{game.get('elapsed_days')}**",
         (
-            "- Tempo jogado: "
-            f"**{round(float(game.get('playtime_seconds') or 0) / 3600, 2)} h**"
+            "- Tempo jogado: **indisponível**"
+            if game.get("playtime_seconds") is None
+            else (
+                "- Tempo jogado: "
+                f"**{round(float(game['playtime_seconds']) / 3600, 2)} h**"
+            )
         ),
         "",
         "## Financeiro",
@@ -48,10 +58,11 @@ def build_markdown(snapshot: dict[str, Any]) -> str:
     ]
     prices = snapshot["products"]["prices"]
     for item_id, quantity in inventory["quantities"].items():
-        price = float(prices.get(item_id, 0) or 0)
+        price = to_finite_decimal(prices.get(item_id)) or Decimal("0")
+        quantity_decimal = to_finite_decimal(quantity) or Decimal("0")
         lines.append(
-            f"| `{item_id}` | {quantity:g} | {money(price)} | "
-            f"{money(float(quantity) * price)} |"
+            f"| `{item_id}` | {decimal_text(quantity_decimal)} | {money(price)} | "
+            f"{money(quantity_decimal * price)} |"
         )
 
     lines += [
@@ -82,4 +93,18 @@ def build_markdown(snapshot: dict[str, Any]) -> str:
         "- Inferências econômicas exigem evidência adicional; este relatório "
         "não atribui significado a campos desconhecidos."
     )
+    availability = snapshot.get("availability")
+    if isinstance(availability, dict):
+        unavailable = [
+            (section, value)
+            for section, value in sorted(availability.items())
+            if isinstance(value, dict) and value.get("state") != "observed"
+        ]
+        if unavailable:
+            lines += ["", "## Disponibilidade", ""]
+            lines.extend(
+                f"- `{section}`: **{value.get('state')}** — "
+                f"{value.get('explanation')}"
+                for section, value in unavailable
+            )
     return "\n".join(lines) + "\n"
