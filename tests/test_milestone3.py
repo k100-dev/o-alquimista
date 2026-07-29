@@ -173,6 +173,15 @@ class OperationalObjectParsingTests(unittest.TestCase):
                 objects["mixingstation"]["operational_state"],
                 "active",
             )
+            self.assertEqual(
+                objects["mixingstation"]["state"]["operation"],
+                {
+                    "ingredient_id": "ingredient-a",
+                    "product_id": "product-a",
+                    "product_quality": None,
+                    "quantity": Decimal("1"),
+                },
+            )
             self.assertEqual(objects["plasticpot"]["operational_state"], "active")
             self.assertEqual(
                 objects["plasticpot"]["state"]["growth_progress"],
@@ -277,8 +286,8 @@ class OperationalObjectParsingTests(unittest.TestCase):
                 for item in current["properties"][0]["objects"]
                 if item["item_id"] == "mixingstation"
             )
-            mixing["operational_state"] = "idle"
-            mixing["state"]["has_operation"] = False
+            mixing["state"]["operation"]["product_id"] = "product-b"
+            mixing["state"]["current_mix_time"] = 1
 
             comparison = compare_snapshots(
                 previous,
@@ -300,6 +309,7 @@ class OperationalObjectParsingTests(unittest.TestCase):
             report = build_comparison_markdown(comparison)
             self.assertIn("## Mudanças operacionais", report)
             self.assertIn("`equipment`", report)
+            self.assertIn("laboratory / mixingstation", report)
 
     def test_timeline_contains_observed_operational_totals(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

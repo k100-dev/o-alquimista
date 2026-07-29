@@ -258,6 +258,26 @@ def _operational_object(
         )
         operational_state = "active" if has_operation else "idle"
         state["has_operation"] = has_operation
+        state["operation"] = (
+            {
+                "ingredient_id": (
+                    str(operation["IngredientID"])
+                    if operation.get("IngredientID") not in (None, "")
+                    else None
+                ),
+                "product_id": (
+                    str(operation["ProductID"])
+                    if operation.get("ProductID") not in (None, "")
+                    else None
+                ),
+                "product_quality": _metric_number(
+                    operation.get("ProductQuality")
+                ),
+                "quantity": to_finite_decimal(operation.get("Quantity")),
+            }
+            if isinstance(operation, dict)
+            else None
+        )
         state["current_mix_time"] = _metric_number(payload.get("CurrentMixTime"))
     elif data_type == "ToggleableItemData" and isinstance(
         payload.get("IsOn"),

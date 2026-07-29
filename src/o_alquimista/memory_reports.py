@@ -41,7 +41,14 @@ def build_comparison_markdown(comparison: SnapshotComparison) -> str:
         for change in changes:
             if change.status == "unchanged":
                 continue
-            lines.append(f"| `{section}` | `{change.field}` | {change.status} |")
+            entity_label = change.field
+            entity = change.current or change.previous
+            if section == "equipment" and isinstance(entity, dict):
+                entity_label = (
+                    f"{entity.get('property') or 'propriedade desconhecida'} / "
+                    f"{entity.get('item_id') or change.field}"
+                )
+            lines.append(f"| `{section}` | `{entity_label}` | {change.status} |")
             operational_rows += 1
     if not operational_rows:
         lines.append("| — | — | nenhuma mudança observada |")

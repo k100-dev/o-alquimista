@@ -37,6 +37,8 @@ sintéticas e sanitizadas.
 
 - diferenciar estação ativa, ociosa e desconhecida;
 - normalizar cultivo, mistura e embalagem sem inventar unidades;
+- preservar produto, ingrediente, qualidade, quantidade e marcador temporal da
+  operação de mistura quando observados;
 - comparar instalação, remoção e mudança de estado entre snapshots;
 - gerar evidências específicas para cada mudança operacional.
 
@@ -83,6 +85,18 @@ timeline inclui totais observados de equipamentos e slots. Snapshots legados
 sem a nova coleção retornam estado `unknown`, nunca remoção presumida.
 
 Slots não equivalem a throughput nem a capacidade por hora.
+
+## Validação controlada
+
+Dois exports reais consecutivos validaram a substituição de uma operação de
+mistura na mesma instância de estação. Produto, ingrediente, qualidade,
+quantidade, marcador temporal e ocupação foram diferenciados, enquanto os
+ZIPs permaneceram byte a byte inalterados.
+
+A coleta também registrou mudanças paralelas em outras instalações. Por isso,
+uma recomendação futura não poderá atribuir causalidade a toda diferença entre
+exports; ela deverá selecionar evidências da instância e da atividade
+correspondentes.
 
 ## Critérios de aceite
 
