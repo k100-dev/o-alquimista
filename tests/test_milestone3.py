@@ -384,6 +384,62 @@ class OperationalObjectParsingTests(unittest.TestCase):
             self.assertIn("operations.idle-cultivation.v1", rules)
             self.assertIn("operations.storage-pressure.v1", rules)
 
+    def test_processing_equipment_and_employee_roles_are_normalized(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "save.zip"
+            files = _base_files()
+            files["Properties/laboratory.json"] = {
+                "PropertyCode": "laboratory",
+                "IsOwned": True,
+                "Employees": [
+                    {
+                        "DataType": "ChemistData",
+                        "BaseData": {
+                            "DataType": "ChemistData",
+                            "ID": "synthetic-chemist",
+                            "PaidForToday": True,
+                        },
+                        "AdditionalDatas": [
+                            {
+                                "Contents": {
+                                    "Stations": {
+                                        "ObjectGUIDs": [
+                                            "synthetic-station-a",
+                                            "synthetic-station-b",
+                                        ]
+                                    }
+                                }
+                            }
+                        ],
+                    }
+                ],
+                "Objects": [
+                    _object(
+                        "LabOvenData",
+                        "laboven",
+                        "synthetic-oven-guid",
+                    ),
+                    _object(
+                        "ChemistryStationData",
+                        "chemistrystation",
+                        "synthetic-chemistry-guid",
+                    ),
+                ],
+            }
+            _create_zip(archive, files)
+
+            snapshot = snapshot_from_zip(archive).to_dict()
+            prop = snapshot["properties"][0]
+            employee = snapshot["employees"][0]
+
+            self.assertEqual(
+                {item["category"] for item in prop["objects"]},
+                {"processing"},
+            )
+            self.assertEqual(employee["role"], "chemist")
+            self.assertEqual(employee["assigned_station_count"], 2)
+            self.assertTrue(employee["paid_for_today"])
+
 
 if __name__ == "__main__":
     unittest.main()

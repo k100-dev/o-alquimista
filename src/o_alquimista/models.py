@@ -25,6 +25,7 @@ SectionAvailabilityState = Literal[
 OperationalCategory = Literal[
     "cultivation",
     "mixing",
+    "processing",
     "packaging",
     "storage",
     "utility",
@@ -156,6 +157,9 @@ class Employee:
     property_name: str | None
     origin: DataOrigin
     raw: JsonValue
+    role: str | None = None
+    assigned_station_count: int | None = None
+    paid_for_today: bool | None = None
     unknown: tuple[UnknownField, ...] = ()
 
 

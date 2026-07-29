@@ -126,6 +126,8 @@ def _availability(
 _OBJECT_CATEGORY_BY_DATA_TYPE = {
     "PotData": "cultivation",
     "MixingStationData": "mixing",
+    "LabOvenData": "processing",
+    "ChemistryStationData": "processing",
     "PackagingStationData": "packaging",
     "PlaceableStorageData": "storage",
     "ToggleableItemData": "utility",
@@ -142,6 +144,75 @@ _OBJECT_CONTAINER_FIELDS = (
     "OutputContents",
     "ProductContents",
 )
+
+_EMPLOYEE_ROLE_BY_DATA_TYPE = {
+    "BotanistData": "botanist",
+    "ChemistData": "chemist",
+    "PackagerData": "packager",
+    "HandlerData": "handler",
+    "CleanerData": "cleaner",
+}
+
+
+def _employee_summary(
+    raw: Any,
+    *,
+    relative_file: str,
+    property_name: str,
+    index: int,
+) -> Employee:
+    envelope = raw if isinstance(raw, dict) else {}
+    base_data = (
+        envelope.get("BaseData")
+        if isinstance(envelope.get("BaseData"), dict)
+        else envelope
+    )
+    data_type_value = base_data.get("DataType") or envelope.get("DataType")
+    data_type = str(data_type_value) if data_type_value is not None else None
+    station_count = 0
+    stations_observed = False
+    additional = envelope.get("AdditionalDatas")
+    if isinstance(additional, list):
+        for entry in additional:
+            if not isinstance(entry, dict):
+                continue
+            contents = entry.get("Contents")
+            if not isinstance(contents, dict):
+                continue
+            stations = contents.get("Stations")
+            if not isinstance(stations, dict):
+                continue
+            identifiers = stations.get("ObjectGUIDs")
+            if isinstance(identifiers, list):
+                stations_observed = True
+                station_count += len(identifiers)
+    employee_id = base_data.get("ID")
+    paid = base_data.get("PaidForToday")
+    return Employee(
+        employee_id=str(employee_id) if employee_id not in (None, "") else None,
+        property_name=property_name,
+        origin=_origin(relative_file, f"Employees[{index}]"),
+        raw=raw,
+        role=_EMPLOYEE_ROLE_BY_DATA_TYPE.get(data_type or ""),
+        assigned_station_count=station_count if stations_observed else None,
+        paid_for_today=paid if isinstance(paid, bool) else None,
+        unknown=(
+            _unknown_fields(
+                envelope,
+                {
+                    "AdditionalDatas",
+                    "BaseData",
+                    "DataType",
+                    "DataVersion",
+                    "GameVersion",
+                    "ID",
+                },
+                relative_file,
+            )
+            if isinstance(raw, dict)
+            else ()
+        ),
+    )
 
 
 def _parse_items(
@@ -390,18 +461,11 @@ def _property_summary(save_root: Path, path: Path) -> Property:
         )
 
     employees = tuple(
-        Employee(
-            employee_id=(
-                str(raw.get("ID")) if isinstance(raw, dict) and raw.get("ID") else None
-            ),
+        _employee_summary(
+            raw,
+            relative_file=relative,
             property_name=path.stem,
-            origin=_origin(relative, f"Employees[{index}]"),
-            raw=raw,
-            unknown=(
-                _unknown_fields(raw, {"ID"}, relative)
-                if isinstance(raw, dict)
-                else ()
-            ),
+            index=index,
         )
         for index, raw in enumerate(employee_values)
     )
