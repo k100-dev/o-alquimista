@@ -4,9 +4,12 @@ import json
 import tempfile
 import unittest
 import zipfile
+from copy import deepcopy
 from decimal import Decimal
 from pathlib import Path
 
+from o_alquimista.analysis import build_timeline_entry, compare_snapshots
+from o_alquimista.memory_reports import build_comparison_markdown
 from o_alquimista.parser import snapshot_from_zip
 from o_alquimista.report import build_markdown
 
@@ -262,6 +265,83 @@ class OperationalObjectParsingTests(unittest.TestCase):
             self.assertIn("`mixingstation`", report)
             self.assertIn("Slots representam recipientes observados", report)
             self.assertNotIn("por hora", report.split("## Instalações observadas")[0])
+
+    def test_operational_state_changes_are_compared_by_stable_instance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "save.zip"
+            _create_zip(archive)
+            previous = snapshot_from_zip(archive).to_dict()
+            current = deepcopy(previous)
+            mixing = next(
+                item
+                for item in current["properties"][0]["objects"]
+                if item["item_id"] == "mixingstation"
+            )
+            mixing["operational_state"] = "idle"
+            mixing["state"]["has_operation"] = False
+
+            comparison = compare_snapshots(
+                previous,
+                current,
+                previous_snapshot_id="snapshot-a",
+                current_snapshot_id="snapshot-b",
+                previous_campaign_id="campaign-a",
+                current_campaign_id="campaign-a",
+            )
+            changes = {
+                change.field: change
+                for change in comparison.operational_changes["equipment"]
+            }
+
+            self.assertEqual(
+                changes[mixing["instance_id"]].status,
+                "changed",
+            )
+            report = build_comparison_markdown(comparison)
+            self.assertIn("## Mudanças operacionais", report)
+            self.assertIn("`equipment`", report)
+
+    def test_timeline_contains_observed_operational_totals(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "save.zip"
+            _create_zip(archive)
+            snapshot = snapshot_from_zip(archive).to_dict()
+
+            timeline = build_timeline_entry(
+                snapshot,
+                snapshot_id="snapshot-a",
+                import_id="import-a",
+                campaign_id="campaign-a",
+                archive_hash="synthetic-hash",
+            )
+
+            self.assertEqual(timeline.operational_summary["equipment"], 4)
+            self.assertEqual(timeline.operational_summary["active_equipment"], 2)
+            self.assertEqual(timeline.operational_summary["observed_slots"], 8)
+            self.assertEqual(timeline.operational_summary["occupied_slots"], 2)
+
+    def test_legacy_snapshot_does_not_infer_equipment_removal(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "save.zip"
+            _create_zip(archive)
+            current = snapshot_from_zip(archive).to_dict()
+            previous = deepcopy(current)
+            for prop in previous["properties"]:
+                prop.pop("objects", None)
+
+            comparison = compare_snapshots(
+                previous,
+                current,
+                previous_snapshot_id="snapshot-legacy",
+                current_snapshot_id="snapshot-current",
+                previous_campaign_id="campaign-a",
+                current_campaign_id="campaign-a",
+            )
+
+            self.assertEqual(
+                comparison.operational_changes["equipment"][0].status,
+                "unknown",
+            )
 
 
 if __name__ == "__main__":

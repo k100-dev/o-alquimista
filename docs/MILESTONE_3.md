@@ -78,6 +78,10 @@ interno das propriedades e amplia o relatório de snapshot com:
 - slots ocupados;
 - slots totais observados.
 
+Comparações passam a correlacionar instâncias pelo identificador estável e a
+timeline inclui totais observados de equipamentos e slots. Snapshots legados
+sem a nova coleção retornam estado `unknown`, nunca remoção presumida.
+
 Slots não equivalem a throughput nem a capacidade por hora.
 
 ## Critérios de aceite

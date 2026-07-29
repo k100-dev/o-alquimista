@@ -29,6 +29,22 @@ def build_comparison_markdown(comparison: SnapshotComparison) -> str:
             f"{change.absolute_change or 'n/a'} | "
             f"{change.percentage_change or 'n/a'} |"
         )
+    lines += [
+        "",
+        "## Mudanças operacionais",
+        "",
+        "| Seção | Entidade | Estado |",
+        "|---|---|---|",
+    ]
+    operational_rows = 0
+    for section, changes in comparison.operational_changes.items():
+        for change in changes:
+            if change.status == "unchanged":
+                continue
+            lines.append(f"| `{section}` | `{change.field}` | {change.status} |")
+            operational_rows += 1
+    if not operational_rows:
+        lines.append("| — | — | nenhuma mudança observada |")
     lines += ["", "## Inferências", "", "- Nenhuma inferência narrativa foi gerada."]
     lines += ["", "## Recomendações", "", "- Nenhuma recomendação é derivada apenas desta comparação."]
     lines += ["", "## Limitações", ""]

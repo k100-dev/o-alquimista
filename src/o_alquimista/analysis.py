@@ -87,7 +87,8 @@ def _entity_map(
     snapshot: dict[str, Any],
     section: str,
 ) -> dict[str, Any] | None:
-    if not _section_is_observed(snapshot, section):
+    availability_section = "properties" if section == "equipment" else section
+    if not _section_is_observed(snapshot, availability_section):
         return None
     if section == "products":
         products = snapshot.get("products")
@@ -113,6 +114,55 @@ def _entity_map(
             for value in values
             if isinstance(value, dict) and value.get("name") is not None
         }
+    if section == "equipment":
+        if not _section_is_observed(snapshot, "properties"):
+            return None
+        properties = snapshot.get("properties")
+        if not isinstance(properties, (list, tuple)):
+            return None
+        if not any(
+            isinstance(prop, dict) and "objects" in prop
+            for prop in properties
+        ):
+            return None
+        equipment: dict[str, Any] = {}
+        for prop in properties:
+            if not isinstance(prop, dict):
+                continue
+            objects = prop.get("objects")
+            if not isinstance(objects, (list, tuple)):
+                continue
+            for operational_object in objects:
+                if not isinstance(operational_object, dict):
+                    continue
+                instance_id = operational_object.get("instance_id")
+                if instance_id is None:
+                    continue
+                containers = operational_object.get("containers")
+                container_values = (
+                    containers if isinstance(containers, (list, tuple)) else ()
+                )
+                equipment[str(instance_id)] = {
+                    "property": prop.get("name"),
+                    "item_id": operational_object.get("item_id"),
+                    "data_type": operational_object.get("data_type"),
+                    "category": operational_object.get("category"),
+                    "operational_state": operational_object.get(
+                        "operational_state"
+                    ),
+                    "state": operational_object.get("state"),
+                    "slot_count": sum(
+                        int(container.get("slot_count", 0))
+                        for container in container_values
+                        if isinstance(container, dict)
+                    ),
+                    "occupied_slot_count": sum(
+                        int(container.get("occupied_slot_count", 0))
+                        for container in container_values
+                        if isinstance(container, dict)
+                    ),
+                }
+        return equipment
     if section in {"vehicles", "employees"}:
         values = snapshot.get(section)
         if not isinstance(values, (list, tuple)):
@@ -241,6 +291,7 @@ def compare_snapshots(
     )
     operational_sections = (
         "properties",
+        "equipment",
         "businesses",
         "vehicles",
         "employees",
@@ -326,6 +377,30 @@ def build_timeline_entry(
         if isinstance(snapshot.get("availability"), dict)
         else {}
     )
+    operational_objects = [
+        operational_object
+        for prop in properties or ()
+        if isinstance(prop, dict)
+        for operational_object in (
+            prop.get("objects")
+            if isinstance(prop.get("objects"), (list, tuple))
+            else ()
+        )
+        if isinstance(operational_object, dict)
+    ]
+    operational_containers = [
+        container
+        for operational_object in operational_objects
+        for container in (
+            operational_object.get("containers")
+            if isinstance(
+                operational_object.get("containers"),
+                (list, tuple),
+            )
+            else ()
+        )
+        if isinstance(container, dict)
+    ]
     return TimelineEntry(
         snapshot_id=snapshot_id,
         import_id=import_id,
@@ -376,6 +451,29 @@ def build_timeline_entry(
                 if _section_is_observed(snapshot, "products")
                 and isinstance(products, dict)
                 else None
+            ),
+            "equipment": (
+                len(operational_objects)
+                if _section_is_observed(snapshot, "properties")
+                and isinstance(properties, (list, tuple))
+                and any(
+                    isinstance(prop, dict) and "objects" in prop
+                    for prop in properties
+                )
+                else None
+            ),
+            "active_equipment": sum(
+                1
+                for operational_object in operational_objects
+                if operational_object.get("operational_state") == "active"
+            ),
+            "observed_slots": sum(
+                int(container.get("slot_count", 0))
+                for container in operational_containers
+            ),
+            "occupied_slots": sum(
+                int(container.get("occupied_slot_count", 0))
+                for container in operational_containers
             ),
         },
         progression_summary={
