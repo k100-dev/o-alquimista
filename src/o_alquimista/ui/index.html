@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#090b0a">
+    <title>O Alquimista</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#overview" aria-label="O Alquimista">
+          <span class="brand-sigil" aria-hidden="true">Δ</span>
+          <span>
+            <strong>O Alquimista</strong>
+            <small>conselheiro operacional</small>
+          </span>
+        </a>
+
+        <nav class="nav-list" aria-label="Navegação principal">
+          <a class="nav-item active" href="#overview">
+            <span aria-hidden="true">◈</span> Câmara
+          </a>
+          <a class="nav-item" href="#counsel">
+            <span aria-hidden="true">✦</span> Conselho
+          </a>
+          <a class="nav-item" href="#laboratories">
+            <span aria-hidden="true">⌂</span> Laboratórios
+          </a>
+          <a class="nav-item" href="#chronicles">
+            <span aria-hidden="true">◷</span> Crônicas
+          </a>
+        </nav>
+
+        <div class="privacy-card">
+          <span class="status-dot" aria-hidden="true"></span>
+          <div>
+            <strong>100% local</strong>
+            <small>Seus saves não saem deste computador.</small>
+          </div>
+        </div>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Centro de comando</p>
+            <h1>Câmara do Alquimista</h1>
+          </div>
+          <div class="topbar-actions">
+            <label class="campaign-picker">
+              <span>Campanha</span>
+              <select id="campaign-select" aria-label="Selecionar campanha"></select>
+            </label>
+            <button id="import-button" class="primary-button" type="button">
+              <span class="import-icon" aria-hidden="true">＋</span>
+              <span id="import-button-label">Importar save</span>
+            </button>
+            <input id="archive-input" type="file" accept=".zip,application/zip" hidden>
+          </div>
+        </header>
+
+        <section id="loading" class="loading-card" aria-live="polite">
+          <div class="loader" aria-hidden="true"></div>
+          <p>Consultando o grimório local…</p>
+        </section>
+
+        <section id="empty-state" class="empty-state hidden">
+          <div class="empty-sigil" aria-hidden="true">Δ</div>
+          <p class="eyebrow">A Câmara está vazia</p>
+          <h2>Entregue seu primeiro export ao Alquimista</h2>
+          <p>
+            Selecione o ZIP criado pelo jogo. A análise acontece somente
+            neste computador e o arquivo temporário é descartado.
+          </p>
+          <button class="primary-button import-trigger" type="button">
+            Escolher export
+          </button>
+        </section>
+
+        <div id="dashboard" class="dashboard hidden">
+          <section id="overview" class="advisor-hero">
+            <div class="advisor-copy">
+              <p id="message-eyebrow" class="eyebrow">Conselho prioritário</p>
+              <h2 id="message-title">Observe antes de expandir</h2>
+              <p id="message-body"></p>
+              <div class="hero-meta">
+                <span id="snapshot-day" class="chip">Dia —</span>
+                <span id="game-version" class="chip">versão —</span>
+                <span id="confidence-chip" class="chip confidence">confiança —</span>
+              </div>
+            </div>
+            <div class="oracle" aria-hidden="true">
+              <div class="oracle-ring ring-one"></div>
+              <div class="oracle-ring ring-two"></div>
+              <div class="oracle-core">Δ</div>
+            </div>
+          </section>
+
+          <section class="metric-grid" aria-label="Indicadores principais">
+            <article class="metric-card">
+              <span class="metric-icon gold" aria-hidden="true">$</span>
+              <p>Liquidez observada</p>
+              <strong id="metric-liquidity">—</strong>
+              <small>saldo e dinheiro físico detectado</small>
+            </article>
+            <article class="metric-card">
+              <span class="metric-icon violet" aria-hidden="true">◆</span>
+              <p>Patrimônio</p>
+              <strong id="metric-networth">—</strong>
+              <small>valor informado pelo save</small>
+            </article>
+            <article class="metric-card">
+              <span class="metric-icon green" aria-hidden="true">⌂</span>
+              <p>Estrutura</p>
+              <strong id="metric-operations">—</strong>
+              <small id="metric-operations-detail">instalações observadas</small>
+            </article>
+            <article class="metric-card">
+              <span class="metric-icon cyan" aria-hidden="true">▦</span>
+              <p>Ocupação</p>
+              <strong id="metric-occupancy">—</strong>
+              <small id="metric-occupancy-detail">slots observados</small>
+            </article>
+          </section>
+
+          <div class="content-grid">
+            <section id="counsel" class="panel counsel-panel">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Decisões explicáveis</p>
+                  <h2>Conselho do Alquimista</h2>
+                </div>
+                <span id="recommendation-count" class="count-badge">0</span>
+              </div>
+              <div id="recommendations" class="recommendation-list"></div>
+            </section>
+
+            <section class="panel operations-panel">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Estado atual</p>
+                  <h2>Radar operacional</h2>
+                </div>
+              </div>
+              <div id="category-bars" class="category-bars"></div>
+            </section>
+          </div>
+
+          <section id="laboratories" class="panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Propriedades possuídas</p>
+                <h2>Laboratórios</h2>
+              </div>
+              <span id="property-count" class="count-badge">0</span>
+            </div>
+            <div id="property-grid" class="property-grid"></div>
+          </section>
+
+          <section id="chronicles" class="panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Memória da campanha</p>
+                <h2>Crônicas recentes</h2>
+              </div>
+            </div>
+            <div id="timeline" class="timeline"></div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

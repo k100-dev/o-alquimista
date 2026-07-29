@@ -13,11 +13,13 @@ associações candidatas sem consolidação automática e precisão monetária c
 [Termo de Aceite Técnico](docs/MILESTONE_2_ACCEPTANCE.md).
 
 O desenvolvimento do Milestone 3, **Os Olhos do Alquimista**, ocorre na branch
-`feat/milestone-3-operacoes`. A primeira entrega decodifica objetos instalados,
-recipientes e estados operacionais observáveis. Consulte
-[docs/MILESTONE_3.md](docs/MILESTONE_3.md).
+`feat/milestone-3-operacoes`. Além de decodificar objetos instalados,
+recipientes e estados operacionais observáveis, ele introduz a primeira
+experiência consultiva local: a **Câmara do Alquimista**. Consulte
+[docs/MILESTONE_3.md](docs/MILESTONE_3.md) e
+[docs/ADVISOR_UI.md](docs/ADVISOR_UI.md).
 
-Não há interface gráfica nem chamadas de rede neste milestone.
+A interface usa somente o computador local e não realiza chamadas externas.
 
 ## Segurança read-only
 
@@ -50,6 +52,17 @@ python -m pip install -e .
 ```
 
 ## Comandos
+
+Abrir a interface consultiva:
+
+```powershell
+alquimista ui --database ".\data\alquimista.sqlite3"
+```
+
+O navegador abre a Câmara em `127.0.0.1`. Você pode importar diretamente o ZIP
+gerado por **Export Save**; ele é processado localmente e sua cópia temporária é
+removida ao final. O caminho planejado para distribuição `.exe` está em
+[docs/DESKTOP_PACKAGING.md](docs/DESKTOP_PACKAGING.md).
 
 Importar de forma idempotente:
 

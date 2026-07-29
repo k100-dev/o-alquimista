@@ -43,3 +43,7 @@ class UnsafeProvenanceError(AlquimistaError):
 
 class UnsupportedDatabaseVersionError(AlquimistaError):
     """O banco foi criado por uma versão mais nova do aplicativo."""
+
+
+class AdvisorUiError(AlquimistaError):
+    """A interface local recebeu uma solicitação inválida ou insegura."""

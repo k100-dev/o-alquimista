@@ -58,12 +58,20 @@ sintéticas e sanitizadas.
 - detectar mudanças de mixagem e embalagem;
 - criar recomendações com `rule_id`, evidências, limitações e confiança.
 
+### 3.5 — Câmara do Alquimista
+
+- oferecer uma interface web local, responsiva e sem dependências externas;
+- importar o ZIP pela própria interface, preservando o fluxo read-only;
+- apresentar somente uma projeção curada, sem `raw` ou identificadores internos;
+- destacar o conselho prioritário, finanças, instalações, ocupação e histórico;
+- manter a arquitetura preparada para empacotamento posterior como `.exe`.
+
 ## Não objetivos
 
 - não calcular lucro por hora sem janela temporal suficiente;
 - não afirmar capacidade produtiva apenas pela quantidade de estações;
 - não atribuir função a item desconhecido por semelhança de nome;
-- não criar GUI neste milestone;
+- não distribuir ainda instalador ou executável Windows;
 - não ler memória do processo do jogo;
 - não modificar save, ZIP ou diretório do jogo;
 - não enviar dados para serviços externos.

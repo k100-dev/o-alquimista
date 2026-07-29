@@ -26,6 +26,7 @@ from .parser import (
     snapshot_from_zip,
 )
 from .report import build_markdown
+from .ui_server import serve_ui
 
 
 def _json_text(data: object) -> str:
@@ -136,6 +137,23 @@ def _parser() -> argparse.ArgumentParser:
     analyze_command.add_argument("campaign_id")
     analyze_command.add_argument("--database", required=True, type=Path)
     _add_output_options(analyze_command)
+
+    ui_command = subcommands.add_parser(
+        "ui",
+        help="Abre a Câmara do Alquimista no navegador local",
+    )
+    ui_command.add_argument(
+        "--database",
+        type=Path,
+        default=Path("data/alquimista.sqlite3"),
+    )
+    ui_command.add_argument("--host", default="127.0.0.1")
+    ui_command.add_argument("--port", type=int, default=8765)
+    ui_command.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Inicia o servidor sem abrir o navegador automaticamente",
+    )
     return parser
 
 
@@ -331,6 +349,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 markdown=build_analysis_markdown(analysis),
                 output_format=args.output_format,
                 output_path=args.out,
+            )
+            return 0
+
+        if args.command == "ui":
+            serve_ui(
+                args.database,
+                host=args.host,
+                port=args.port,
+                open_browser=not args.no_browser,
             )
             return 0
     except (
