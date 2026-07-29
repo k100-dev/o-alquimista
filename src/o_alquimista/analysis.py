@@ -717,6 +717,28 @@ class RecommendationRule:
     evaluator: Callable[[RecommendationContext], StrategicRecommendation | None]
 
 
+def _owned_operational_objects(
+    snapshot: dict[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    properties = snapshot.get("properties")
+    if (
+        not _section_is_observed(snapshot, "properties")
+        or not isinstance(properties, (list, tuple))
+    ):
+        return ()
+    return tuple(
+        operational_object
+        for prop in properties
+        if isinstance(prop, dict) and prop.get("owned") is True
+        for operational_object in (
+            prop.get("objects")
+            if isinstance(prop.get("objects"), (list, tuple))
+            else ()
+        )
+        if isinstance(operational_object, dict)
+    )
+
+
 def _recommendation(
     context: RecommendationContext,
     *,
@@ -865,11 +887,129 @@ def _insufficient_history_rule(
     )
 
 
+def _idle_cultivation_rule(
+    context: RecommendationContext,
+) -> StrategicRecommendation | None:
+    cultivation = tuple(
+        item
+        for item in _owned_operational_objects(context.snapshot)
+        if item.get("category") == "cultivation"
+    )
+    idle = tuple(
+        item
+        for item in cultivation
+        if item.get("operational_state") == "idle"
+    )
+    if not idle:
+        return None
+    evidence = derived_evidence(
+        sources=("Properties/*.json",),
+        field_name="idle_cultivation_count",
+        value={"idle": len(idle), "observed": len(cultivation)},
+        calculation=(
+            "contagem de objetos de cultivo com operational_state igual a idle"
+        ),
+        explanation=(
+            "Vasos observados sem planta foram contabilizados nas propriedades "
+            "possuídas."
+        ),
+        related_entity="cultivation",
+    )
+    return _recommendation(
+        context,
+        rule_id="operations.idle-cultivation.v1",
+        category="cultivo",
+        title="Usar a estrutura de cultivo já instalada",
+        explanation=(
+            f"{len(idle)} de {len(cultivation)} vasos observados estão sem planta. "
+            "Antes de comprar novos vasos, confirme se os atuais devem entrar no "
+            "próximo ciclo."
+        ),
+        priority="medium",
+        confidence="medium",
+        evidence=(evidence,),
+        confidence_justification=(
+            "A ausência de planta é observável, mas demanda, sementes e intenção "
+            "do jogador não estão completamente disponíveis."
+        ),
+        missing=("demanda por produto", "estoque de sementes utilizável"),
+        limitations=(
+            "Vaso vazio pode ser uma escolha deliberada de reserva operacional.",
+        ),
+    )
+
+
+def _storage_pressure_rule(
+    context: RecommendationContext,
+) -> StrategicRecommendation | None:
+    containers = [
+        container
+        for item in _owned_operational_objects(context.snapshot)
+        if item.get("category") == "storage"
+        for container in (
+            item.get("containers")
+            if isinstance(item.get("containers"), (list, tuple))
+            else ()
+        )
+        if isinstance(container, dict)
+    ]
+    slot_count = sum(int(item.get("slot_count", 0)) for item in containers)
+    occupied = sum(
+        int(item.get("occupied_slot_count", 0)) for item in containers
+    )
+    if slot_count < 4:
+        return None
+    occupancy = (Decimal(occupied) / Decimal(slot_count)) * Decimal("100")
+    if occupancy < Decimal("80"):
+        return None
+    evidence = derived_evidence(
+        sources=("Properties/*.json",),
+        field_name="storage_occupancy",
+        value={
+            "occupied_slots": occupied,
+            "observed_slots": slot_count,
+            "percentage": _decimal_text(occupancy),
+        },
+        calculation="slots ocupados / slots observados * 100",
+        explanation="Ocupação derivada apenas de recipientes de armazenamento.",
+        related_entity="storage",
+    )
+    return _recommendation(
+        context,
+        rule_id="operations.storage-pressure.v1",
+        category="armazenamento",
+        title="Liberar espaço antes do próximo lote",
+        explanation=(
+            f"{occupied} de {slot_count} slots de armazenamento estão ocupados. "
+            "Realoque ou venda estoque antes de ampliar a produção."
+        ),
+        priority="high" if occupied == slot_count else "medium",
+        confidence="medium",
+        evidence=(evidence,),
+        confidence_justification=(
+            "Slots e ocupação são observados, mas o volume físico e a demanda "
+            "futura não estão disponíveis."
+        ),
+        missing=("volume por item", "demanda futura"),
+        limitations=(
+            "A regra não inclui recipientes internos de estações produtivas.",
+        ),
+    )
+
+
 RECOMMENDATION_RULES: tuple[RecommendationRule, ...] = (
     RecommendationRule("liquidity.minimum-buffer.v1", _low_liquidity_rule),
     RecommendationRule(
         "operations.owner-dependency.v1",
         _operational_dependency_rule,
+    ),
+    RecommendationRule(
+        "operations.idle-cultivation.v1",
+        _idle_cultivation_rule,
+    ),
+    RecommendationRule(
+        "operations.storage-pressure.v1",
+        _storage_pressure_rule,
     ),
     RecommendationRule("memory.collect-baseline.v1", _insufficient_history_rule),
 )

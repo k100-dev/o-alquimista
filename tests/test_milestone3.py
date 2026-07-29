@@ -8,7 +8,12 @@ from copy import deepcopy
 from decimal import Decimal
 from pathlib import Path
 
-from o_alquimista.analysis import build_timeline_entry, compare_snapshots
+from o_alquimista.analysis import (
+    RecommendationContext,
+    build_timeline_entry,
+    compare_snapshots,
+    generate_recommendations,
+)
 from o_alquimista.memory_reports import build_comparison_markdown
 from o_alquimista.parser import snapshot_from_zip
 from o_alquimista.report import build_markdown
@@ -352,6 +357,32 @@ class OperationalObjectParsingTests(unittest.TestCase):
                 comparison.operational_changes["equipment"][0].status,
                 "unknown",
             )
+
+    def test_operational_rules_prioritize_idle_cultivation_and_storage(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "save.zip"
+            _create_zip(archive)
+            snapshot = snapshot_from_zip(archive).to_dict()
+            objects = snapshot["properties"][0]["objects"]
+            pot = next(item for item in objects if item["category"] == "cultivation")
+            storage = next(item for item in objects if item["category"] == "storage")
+            pot["operational_state"] = "idle"
+            pot["state"]["has_plant"] = False
+            storage["containers"][0]["slot_count"] = 5
+            storage["containers"][0]["occupied_slot_count"] = 5
+
+            recommendations = generate_recommendations(
+                RecommendationContext(
+                    campaign_id="campaign-a",
+                    snapshot_id="snapshot-a",
+                    snapshot=snapshot,
+                    snapshot_count=2,
+                )
+            )
+            rules = {item.rule_id for item in recommendations}
+
+            self.assertIn("operations.idle-cultivation.v1", rules)
+            self.assertIn("operations.storage-pressure.v1", rules)
 
 
 if __name__ == "__main__":
