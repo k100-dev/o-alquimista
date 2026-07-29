@@ -12,6 +12,62 @@ O Alquimista deve responder quatro perguntas, nesta ordem:
 O sistema não chama quantidade de objetos de eficiência, preço de referência
 de lucro, nem comparação de causalidade.
 
+## Jornada narrativa
+
+O companion organiza a campanha em quatro capítulos:
+
+1. **O Despertar** — primeira propriedade observada;
+2. **A Transmutação** — produtos e base produtiva formam um sistema;
+3. **O Círculo** — existe ao menos um funcionário observado;
+4. **A Ascensão** — múltiplas propriedades e portfólio amplo.
+
+Os critérios são determinísticos e explicáveis. Os capítulos não substituem o
+rank, o tier nem conquistas oficiais do Schedule I.
+
+## Ciclo de jogo
+
+A proposta central da experiência é:
+
+```text
+export → conversa → missão → sessão de jogo → novo export → retorno → conversa
+```
+
+O checklist da missão é uma ajuda de navegação local. A etapa de retorno só é
+concluída pelo sistema quando um snapshot diferente é importado. A comparação
+avalia mudanças observadas, mas conclusão causal e impacto continuam limitados
+pelas evidências disponíveis.
+
+## Sala de Conselho
+
+O mentor recebe uma pergunta curta, identifica a intenção e responde usando a
+mesma projeção curada da interface. Uma resposta sempre inclui:
+
+- tese principal;
+- evidências do export;
+- próximo movimento;
+- confiança;
+- limite epistemológico;
+- perguntas de continuação.
+
+As intenções iniciais cobrem estratégia, expansão, finanças, gargalos, equipe,
+portfólio e memória. Uma pergunta fora desse conjunto recebe o conselho
+prioritário do snapshot, em vez de uma resposta inventada.
+
+## Retorno da sessão
+
+Ao importar outro export, a Câmara preserva o contexto anterior, solicita uma
+comparação pelos IDs exatos dos snapshots e monta um retorno contendo:
+
+- veredito comparativo;
+- até três mudanças financeiras ou operacionais;
+- relação com a missão ativa;
+- distinção entre hipótese fortalecida e simples evidência recebida;
+- convite para discutir o resultado com o mentor.
+
+Se a ação não foi marcada como executada, o retorno não presume execução. Se
+há mudanças, o sistema continua explicitando que correlação não prova
+causalidade.
+
 ## Qualidade do diagnóstico
 
 O índice de qualidade do diagnóstico varia de 0 a 100 e combina:
@@ -39,6 +95,13 @@ Cada ação deve conter:
 - sinal observável de conclusão;
 - confiança;
 - regra de origem.
+
+Na interface, cada ação vira uma missão que acrescenta:
+
+- recompensa narrativa;
+- ritual de três passos;
+- progresso local;
+- possibilidade de trocar de objetivo sem alterar os dados analíticos.
 
 Quando uma regra analítica não produz três ações, o consultor pode completar o
 plano com verificações conservadoras de equipe, conversão de estoque e

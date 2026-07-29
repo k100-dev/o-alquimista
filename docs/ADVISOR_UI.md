@@ -34,6 +34,10 @@ Use `--no-browser` quando quiser iniciar apenas o servidor.
 5. Snapshot, evidências e análise são persistidos no SQLite local.
 6. A cópia temporária é removida.
 7. A interface recebe apenas uma projeção curada para apresentação.
+8. O jogador pode consultar o mentor local sobre a decisão atual.
+9. Uma missão ativa define o experimento da próxima sessão.
+10. No novo export, a Câmara compara os momentos e apresenta o retorno da
+    sessão antes do próximo conselho.
 
 Nenhuma chamada de rede externa é necessária. O servidor rejeita endereços de
 escuta que não sejam locais e aplica limite de 64 MB ao upload.
@@ -52,6 +56,7 @@ As rotas locais são:
 - `GET /api/dashboard`;
 - `GET /api/dashboard?campaign_id=...`;
 - `GET /api/comparison?current_campaign_id=...&baseline_campaign_id=...`;
+- `POST /api/mentor`;
 - `POST /api/import`.
 
 ## Linguagem da interface
@@ -69,6 +74,20 @@ save. Um equipamento reconhecido sem estado não é presumido ocioso.
 
 ## Camadas consultivas
 
+- **Capítulo da campanha** transforma fatos observados em uma narrativa curta
+  de progressão. É uma camada do companion, não o rank oficial do jogo.
+- **Caminho da operação** organiza a evolução em Despertar, Transmutação,
+  Círculo e Ascensão.
+- **Quadro de missões** permite assumir um objetivo e acompanhar localmente o
+  ritual “assumir, executar, reimportar”.
+- **Sala de Conselho** responde perguntas sobre caixa, expansão, gargalos,
+  equipe, estoque e memória usando exclusivamente a projeção curada do export.
+- **Retorno à Câmara** compara o snapshot anterior ao novo, apresenta deltas e
+  relaciona as mudanças à missão ativa sem alegar causalidade.
+- **Ciclo de acompanhamento** torna explícito o propósito do produto:
+  conversar, assumir, jogar, exportar e aprender.
+- **Selos da jornada** reconhecem marcos observáveis sem se apresentar como
+  achievements oficiais do jogo.
 - **Qualidade do diagnóstico** mede a sustentação da análise, não o desempenho
   do jogador.
 - **Plano de agora** converte regras em ação, motivo, impacto e sinal de
@@ -81,11 +100,59 @@ save. Um equipamento reconhecido sem estado não é presumido ocioso.
   sem consolidar campanhas candidatas.
 - **O que sabemos** torna explícita a diferença entre observado e ausente.
 
+O modo inicial revela apenas narrativa, recursos essenciais e missões. O painel
+analítico completo fica atrás de uma ação explícita de aprofundamento, evitando
+que o usuário precise compreender todas as métricas antes de agir.
+
+## Estado interativo
+
+A missão selecionada, o checklist, a conversa e o último retorno ficam em
+`localStorage`. A missão é isolada por campanha; a conversa acompanha a
+jornada no dispositivo para não ser perdida quando um novo export candidato
+recebe outro identificador. Esse estado:
+
+- permanece somente no navegador local;
+- não altera o save;
+- não é enviado ao servidor;
+- não transforma uma marcação manual em evidência analítica;
+- serve apenas para orientar a sessão do jogador.
+
+O terceiro passo da missão só é concluído automaticamente depois da importação
+de outro export. A Câmara então utiliza os IDs exatos dos snapshots anterior e
+atual, inclusive quando ambos pertencem à mesma campanha confirmada.
+
+## Mentor conversacional local
+
+O mentor não é um chatbot de rede. As respostas são determinísticas, testáveis
+e baseadas em tópicos reconhecidos na pergunta:
+
+- próximo movimento;
+- expansão e compras;
+- dinheiro e liquidez;
+- gargalos;
+- equipe e delegação;
+- estoque, produtos e receitas;
+- valor do próximo export.
+
+Cada resposta contém evidências curadas, uma ação, nível de confiança e a
+limitação da análise. O texto nunca recebe `raw`, `unknown_fields`, caminhos
+locais ou identificadores internos.
+
+## Identidade visual
+
+O retrato original do personagem está em
+`ui/assets/alchemist-portrait-v1.png`. Ele foi produzido para esta interface,
+sem texto, logotipo ou semelhança intencional com personagem existente.
+
 ## Limites atuais
 
 - a interface apresenta fatos e regras locais já sustentadas pelo motor;
 - lucro por hora, ROI e capacidade não são exibidos sem dados suficientes;
 - campanhas candidatas continuam separadas;
 - comparações candidatas mostram correlação, não causalidade;
+- progresso manual de missão não substitui validação por novo snapshot;
+- a conversa compreende um conjunto explícito de intenções e não substitui um
+  modelo generativo externo;
+- o retorno compara mudanças observadas, mas não prova que a missão as causou;
 - o navegador é o contêiner visual desta primeira versão;
 - o empacotamento `.exe` é uma etapa posterior e não altera o motor analítico.

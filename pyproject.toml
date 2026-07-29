@@ -17,4 +17,4 @@ schedule-intel = "o_alquimista.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-o_alquimista = ["ui/*.html", "ui/*.css", "ui/*.js"]
+o_alquimista = ["ui/*.html", "ui/*.css", "ui/*.js", "ui/assets/*.png"]

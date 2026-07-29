@@ -23,6 +23,12 @@ A interface usa somente o computador local e não realiza chamadas externas.
 Ela separa máquinas produtivas, armazenamento e itens de apoio; explica os
 indicadores; cria um plano de ação com critérios de sucesso; resume equipe e
 portfólio; e permite comparar exports relacionados de forma exploratória.
+Uma camada de jornada apresenta capítulos, selos e missões interativas; o
+painel técnico completo só aparece quando o usuário decide aprofundar. A Sala
+de Conselho permite conversar localmente com um mentor determinístico sobre
+caixa, expansão, gargalos, equipe e estoque. Depois de um novo export, a
+Câmara compara os dois momentos, registra o retorno e relaciona o resultado à
+missão ativa.
 Consulte também [o método consultivo](docs/ADVISOR_METHOD.md).
 
 ## Segurança read-only

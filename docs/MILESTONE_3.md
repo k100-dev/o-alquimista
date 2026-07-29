@@ -78,6 +78,29 @@ sintéticas e sanitizadas.
 - comparar exports candidatos sem consolidá-los automaticamente;
 - incluir glossário e revelação progressiva de limitações.
 
+### 3.7 — Jornada gamificada
+
+- introduzir o Alquimista como personagem original e mentor visual;
+- criar capítulos determinísticos de campanha sem substituir o rank do jogo;
+- mostrar uma trilha de evolução e selos do companion;
+- transformar recomendações em missões selecionáveis;
+- persistir o checklist apenas no navegador local;
+- exigir novo export para validar o impacto real;
+- esconder o painel técnico até que o usuário peça aprofundamento.
+
+### 3.8 — Companion assistencial contínuo
+
+- oferecer uma Sala de Conselho com perguntas livres dentro de intenções
+  fundamentadas no domínio;
+- exibir evidências, ação, confiança e limitações em cada resposta;
+- preservar a conversa somente no dispositivo;
+- mostrar o ciclo conversar, assumir, jogar, exportar e aprender;
+- concluir automaticamente a etapa de retorno quando outro snapshot é
+  importado;
+- comparar os IDs exatos dos snapshots anterior e atual;
+- apresentar um julgamento conservador da missão, sem atribuir causalidade;
+- levar o resultado de volta à conversa para iniciar o próximo ciclo.
+
 ## Não objetivos
 
 - não calcular lucro por hora sem janela temporal suficiente;

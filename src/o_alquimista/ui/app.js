@@ -12,6 +12,10 @@ const ui = {
   compareButton: document.querySelector("#compare-button"),
   toast: document.querySelector("#toast"),
   helpDialog: document.querySelector("#help-dialog"),
+  onboardingDialog: document.querySelector("#onboarding-dialog"),
+  mentorForm: document.querySelector("#mentor-form"),
+  mentorInput: document.querySelector("#mentor-input"),
+  mentorSend: document.querySelector("#mentor-send"),
 };
 
 const categoryLabels = {
@@ -64,13 +68,13 @@ const priorityLabels = {
 
 const helpContent = {
   overview: {
-    title: "Como ler a Câmara",
-    body: "Esta tela transforma um export do save em decisões práticas. Ela não acompanha o jogo em tempo real.",
+    title: "O ritual da campanha",
+    body: "O Alquimista transforma cada export em um capítulo e oferece missões que você pode executar no jogo.",
     details: [
-      "Fato observado: está diretamente no save.",
-      "Cálculo: combina valores observados sem adivinhar.",
-      "Inferência: hipótese sinalizada com confiança e limitações.",
-      "Ausente: o Alquimista prefere dizer “não sei” a inventar zero.",
+      "Escute a leitura do capítulo atual.",
+      "Assuma uma missão no quadro de objetivos.",
+      "Jogue e execute a ação sem preencher formulários.",
+      "Importe um novo save para verificar o resultado.",
     ],
   },
   liquidity: {
@@ -96,6 +100,8 @@ const helpContent = {
 };
 
 let currentDashboard = null;
+const MENTOR_HISTORY_KEY = "o-alquimista.mentor.v1";
+const LAST_REVIEW_KEY = "o-alquimista.return-review.v1";
 
 function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
@@ -158,6 +164,66 @@ function openHelp(key = "overview") {
   ui.helpDialog.showModal();
 }
 
+function questStorageKey(campaignId) {
+  return `o-alquimista.quest.v1.${campaignId || "unknown"}`;
+}
+
+function loadQuestState(campaignId) {
+  try {
+    return JSON.parse(localStorage.getItem(questStorageKey(campaignId)) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function saveQuestState(campaignId, state) {
+  if (state) {
+    localStorage.setItem(questStorageKey(campaignId), JSON.stringify(state));
+  } else {
+    localStorage.removeItem(questStorageKey(campaignId));
+  }
+}
+
+function readLocalJson(key, fallback) {
+  try {
+    return JSON.parse(localStorage.getItem(key) || "null") ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeLocalJson(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function loadMentorHistory() {
+  const history = readLocalJson(MENTOR_HISTORY_KEY, []);
+  return Array.isArray(history) ? history.slice(-24) : [];
+}
+
+function saveMentorHistory(history) {
+  writeLocalJson(MENTOR_HISTORY_KEY, history.slice(-24));
+}
+
+function addMentorMessage(message) {
+  const history = loadMentorHistory();
+  history.push(message);
+  saveMentorHistory(history);
+}
+
+function loadLastReview() {
+  return readLocalJson(LAST_REVIEW_KEY, null);
+}
+
+function saveLastReview(review) {
+  if (review) writeLocalJson(LAST_REVIEW_KEY, review);
+  else localStorage.removeItem(LAST_REVIEW_KEY);
+}
+
+function showOnboarding() {
+  if (!ui.onboardingDialog.open) ui.onboardingDialog.showModal();
+}
+
 function renderCampaigns(data) {
   clear(ui.campaignSelect);
   for (const campaign of data.campaigns || []) {
@@ -190,7 +256,11 @@ function renderCampaigns(data) {
 }
 
 function renderMessage(data) {
-  document.querySelector("#message-eyebrow").textContent = data.message.eyebrow;
+  document.querySelector("#chapter-number").textContent = data.story.chapter_number;
+  document.querySelector("#chapter-title").textContent = data.story.chapter_title;
+  document.querySelector("#story-headline").textContent =
+    `${data.story.chapter_title}: seu próximo movimento.`;
+  document.querySelector("#story-narrative").textContent = data.story.narrative;
   document.querySelector("#message-title").textContent = data.message.title;
   document.querySelector("#message-body").textContent = data.message.body;
   document.querySelector("#snapshot-explanation").textContent = data.snapshot.explanation;
@@ -198,10 +268,366 @@ function renderMessage(data) {
     data.snapshot.elapsed_days === null ? "dia indisponível" : `dia ${data.snapshot.elapsed_days}`;
   document.querySelector("#snapshot-time").textContent =
     data.snapshot.moment?.time_label || "hora indisponível";
-  document.querySelector("#game-version").textContent =
-    `jogo ${data.snapshot.game_version || "versão desconhecida"}`;
+  document.querySelector("#game-rank").textContent =
+    data.story.game_rank === null || data.story.game_rank === undefined
+      ? "rank indisponível"
+      : `rank ${data.story.game_rank} · tier ${data.story.game_tier ?? "—"}`;
   document.querySelector("#confidence-chip").textContent =
     `identidade ${confidenceLabels[data.campaign?.confidence] || "indisponível"}`;
+}
+
+function renderStory(data) {
+  document.querySelector("#story-note").textContent = data.story.companion_note;
+  document.querySelector("#next-unlock").textContent = data.story.next_unlock;
+  const path = document.querySelector("#story-path");
+  clear(path);
+  for (const stage of data.story.path) {
+    const card = element(
+      "article",
+      `story-stage${stage.current ? " current" : ""}${stage.completed ? " completed" : ""}`,
+    );
+    card.appendChild(element("span", "story-stage-number", stage.roman));
+    const copy = element("div", "");
+    copy.appendChild(element("strong", "", stage.title));
+    copy.appendChild(element("small", "", stage.description));
+    card.appendChild(copy);
+    card.appendChild(
+      element(
+        "span",
+        "story-stage-state",
+        stage.current ? "agora" : stage.completed ? "concluído" : "bloqueado",
+      ),
+    );
+    path.appendChild(card);
+  }
+
+  const achievements = document.querySelector("#achievement-strip");
+  clear(achievements);
+  achievements.appendChild(element("span", "achievement-title", "Selos da jornada"));
+  for (const achievement of data.achievements || []) {
+    const badge = element("article", "achievement");
+    badge.appendChild(element("span", "achievement-icon", achievement.icon));
+    const copy = element("div", "");
+    copy.appendChild(element("strong", "", achievement.title));
+    copy.appendChild(element("small", "", achievement.description));
+    badge.appendChild(copy);
+    achievements.appendChild(badge);
+  }
+}
+
+function mentorEvidenceValue(item) {
+  if (item.value === null || item.value === undefined || item.value === "") {
+    return "indisponível";
+  }
+  if (item.format === "money") return money(item.value);
+  if (item.format === "percent") return `${item.value}%`;
+  if (item.format === "score") return `${item.value}/100`;
+  return String(item.value);
+}
+
+function mentorGreeting(data) {
+  return {
+    role: "mentor",
+    title: `Eu li o capítulo ${data.story.chapter_number}: ${data.story.chapter_title}`,
+    answer: (
+      `${data.message.body} Você pode me perguntar sobre uma compra, um gargalo, ` +
+      "sua equipe, o estoque ou o que devemos provar no próximo export."
+    ),
+    evidence: [
+      {
+        label: "Qualidade do diagnóstico",
+        value: data.diagnostic.decision_readiness_score,
+        format: "score",
+      },
+      {
+        label: "Missões disponíveis",
+        value: (data.quests || []).length,
+        format: "number",
+      },
+    ],
+    action: (data.quests || [])[0]?.objective || "Traga outro momento da campanha.",
+    confidence: "medium",
+    follow_up: [
+      "O que devo fazer agora?",
+      "Posso expandir com segurança?",
+      "O que o próximo export vai provar?",
+    ],
+    snapshot_id: data.snapshot.snapshot_id,
+  };
+}
+
+function renderMentor(data) {
+  const container = document.querySelector("#mentor-messages");
+  let history = loadMentorHistory();
+  if (!history.length) {
+    history = [mentorGreeting(data)];
+    saveMentorHistory(history);
+  }
+  clear(container);
+  for (const message of history.slice(-10)) {
+    const article = element("article", `mentor-message ${message.role || "mentor"}`);
+    const avatar = element("span", "mentor-avatar", message.role === "user" ? "Você" : "△");
+    article.appendChild(avatar);
+    const copy = element("div", "mentor-message-copy");
+    if (message.role === "user") {
+      copy.appendChild(element("p", "", message.question));
+    } else {
+      copy.appendChild(element("small", "", "O Alquimista responde"));
+      copy.appendChild(element("h3", "", message.title));
+      copy.appendChild(element("p", "", message.answer));
+      if ((message.evidence || []).length) {
+        const evidence = element("div", "mentor-evidence");
+        for (const item of message.evidence) {
+          const row = element("div", "");
+          row.appendChild(element("span", "", item.label));
+          row.appendChild(element("strong", "", mentorEvidenceValue(item)));
+          evidence.appendChild(row);
+        }
+        copy.appendChild(evidence);
+      }
+      if (message.action) {
+        const action = element("div", "mentor-action");
+        action.appendChild(element("span", "", "Próximo movimento"));
+        action.appendChild(element("strong", "", message.action));
+        copy.appendChild(action);
+      }
+      if (message.caution) {
+        const details = element("details", "mentor-caution");
+        details.appendChild(element("summary", "", "Até onde esta resposta é segura?"));
+        details.appendChild(element("p", "", message.caution));
+        copy.appendChild(details);
+      }
+      if ((message.follow_up || []).length) {
+        const followups = element("div", "mentor-followups");
+        for (const question of message.follow_up.slice(0, 3)) {
+          const button = element("button", "", question);
+          button.type = "button";
+          button.addEventListener("click", () => askMentor(question));
+          followups.appendChild(button);
+        }
+        copy.appendChild(followups);
+      }
+    }
+    article.appendChild(copy);
+    container.appendChild(article);
+  }
+  window.requestAnimationFrame(() => {
+    container.scrollTop = container.scrollHeight;
+  });
+}
+
+async function askMentor(rawQuestion) {
+  if (!currentDashboard || currentDashboard.status !== "ready") return;
+  const question = String(rawQuestion || "").trim();
+  if (!question) {
+    ui.mentorInput.focus();
+    return;
+  }
+  addMentorMessage({
+    role: "user",
+    question,
+    snapshot_id: currentDashboard.snapshot.snapshot_id,
+  });
+  renderMentor(currentDashboard);
+  ui.mentorInput.value = "";
+  ui.mentorInput.disabled = true;
+  ui.mentorSend.disabled = true;
+  ui.mentorSend.textContent = "Consultando…";
+  try {
+    const response = await fetch("/api/mentor", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        campaign_id: currentDashboard.selected_campaign_id,
+        question,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok || data.error) throw new Error(data.error || "Falha na consulta.");
+    addMentorMessage({role: "mentor", ...data});
+    renderMentor(currentDashboard);
+  } catch (error) {
+    addMentorMessage({
+      role: "mentor",
+      title: "A leitura foi interrompida",
+      answer: error.message || "Não consegui responder agora.",
+      evidence: [],
+      action: "Tente novamente sem importar outro save.",
+      confidence: "unavailable",
+      follow_up: [],
+    });
+    renderMentor(currentDashboard);
+  } finally {
+    ui.mentorInput.disabled = false;
+    ui.mentorSend.disabled = false;
+    ui.mentorSend.textContent = "Perguntar";
+    ui.mentorInput.focus();
+  }
+}
+
+function renderSessionReview(review = loadLastReview()) {
+  const container = document.querySelector("#session-review");
+  if (
+    !review ||
+    !currentDashboard ||
+    review.current_campaign_id !== currentDashboard.selected_campaign_id
+  ) {
+    container.classList.add("hidden");
+    return;
+  }
+  container.classList.remove("hidden");
+  document.querySelector("#review-title").textContent = review.title;
+  document.querySelector("#review-body").textContent = review.body;
+  const verdict = document.querySelector("#review-verdict");
+  verdict.textContent = review.verdict;
+  verdict.dataset.tone = review.tone || "neutral";
+  const deltas = document.querySelector("#review-deltas");
+  clear(deltas);
+  for (const item of review.deltas || []) {
+    const card = element("article", `review-delta ${item.tone || "neutral"}`);
+    card.appendChild(element("span", "", item.label));
+    card.appendChild(element("strong", "", item.value));
+    card.appendChild(element("small", "", item.note));
+    deltas.appendChild(card);
+  }
+  document.querySelector("#review-quest-title").textContent = review.quest_title;
+  document.querySelector("#review-quest-body").textContent = review.quest_body;
+}
+
+function comparisonReview(comparison, previousDashboard, nextDashboard, questState) {
+  const deltas = [];
+  for (const item of (comparison.financial_changes || []).filter((row) => row.status === "changed").slice(0, 3)) {
+    const numeric = Number(item.absolute_change || 0);
+    deltas.push({
+      label: item.label,
+      value: signedMoney(item.absolute_change),
+      note: "mudança observada entre os exports",
+      tone: numeric > 0 ? "good" : numeric < 0 ? "attention" : "neutral",
+    });
+  }
+  for (const item of (comparison.operational_sections || []).slice(0, Math.max(0, 3 - deltas.length))) {
+    deltas.push({
+      label: item.label,
+      value: `${item.changed_count} ${item.changed_count === 1 ? "mudança" : "mudanças"}`,
+      note: `+${item.added_count} · −${item.removed_count} · ${item.updated_count} alteradas`,
+      tone: "neutral",
+    });
+  }
+  if (!deltas.length) {
+    deltas.push({
+      label: "Estado observado",
+      value: "sem mudança relevante",
+      note: "o novo export ainda é útil como evidência",
+      tone: "neutral",
+    });
+  }
+  const completed = Array.isArray(questState?.completed)
+    ? [...questState.completed, false, false, false].slice(0, 3)
+    : [false, false, true];
+  completed[2] = true;
+  const executed = Boolean(completed[1]);
+  const changed = deltas.some((item) => item.value !== "sem mudança relevante");
+  const quest = questState?.quest;
+  const questTitle = quest?.title || "Sessão registrada";
+  const questBody = quest
+    ? executed && changed
+      ? (
+        "Você marcou a ação como executada e o novo export registrou mudanças. " +
+        "Isso fortalece a hipótese, mas ainda não prova causalidade."
+      )
+      : executed
+        ? (
+          "A ação foi marcada como executada, porém o efeito não ficou claro neste " +
+          "export. Mantenha a operação estável e observe mais um ciclo."
+        )
+        : (
+          "O retorno foi registrado, mas a etapa de execução não foi confirmada. " +
+          "Marque o que realmente fez antes de interpretar o resultado."
+        )
+    : "Nenhuma missão estava ativa; o novo momento foi guardado como referência.";
+  return {
+    title: comparison.verdict.title,
+    body: comparison.verdict.body,
+    verdict: executed && changed ? "hipótese fortalecida" : "evidência recebida",
+    tone: executed && changed ? "good" : comparison.verdict.tone || "neutral",
+    deltas,
+    quest_title: questTitle,
+    quest_body: questBody,
+    current_campaign_id: nextDashboard.selected_campaign_id,
+    baseline_campaign_id: previousDashboard.selected_campaign_id,
+    created_at: new Date().toISOString(),
+  };
+}
+
+async function evaluateReturn(previousDashboard, nextDashboard, questState, deduplicated) {
+  if (!previousDashboard || !nextDashboard || deduplicated) return;
+  if (previousDashboard.snapshot.snapshot_id === nextDashboard.snapshot.snapshot_id) return;
+  const query = new URLSearchParams({
+    current_campaign_id: nextDashboard.selected_campaign_id,
+    baseline_campaign_id: previousDashboard.selected_campaign_id,
+    current_snapshot_id: nextDashboard.snapshot.snapshot_id,
+    baseline_snapshot_id: previousDashboard.snapshot.snapshot_id,
+  });
+  try {
+    const response = await fetch(`/api/comparison?${query}`);
+    const comparison = await response.json();
+    if (!response.ok || comparison.error) {
+      throw new Error(comparison.error || "Não foi possível avaliar o retorno.");
+    }
+    const review = comparisonReview(
+      comparison,
+      previousDashboard,
+      nextDashboard,
+      questState,
+    );
+    saveLastReview(review);
+    if (questState) {
+      const completed = Array.isArray(questState.completed)
+        ? [...questState.completed, false, false, false].slice(0, 3)
+        : [true, false, false];
+      completed[2] = true;
+      saveQuestState(nextDashboard.selected_campaign_id, {
+        ...questState,
+        completed,
+        reviewed_snapshot_id: nextDashboard.snapshot.snapshot_id,
+        review,
+      });
+      if (
+        previousDashboard.selected_campaign_id !== nextDashboard.selected_campaign_id
+      ) {
+        saveQuestState(previousDashboard.selected_campaign_id, null);
+      }
+      renderActionPlan(nextDashboard);
+      renderActiveQuest(nextDashboard);
+    }
+    addMentorMessage({
+      role: "mentor",
+      title: "O novo export foi comparado com o capítulo anterior",
+      answer: `${review.body} ${review.quest_body}`,
+      evidence: review.deltas.map((item) => ({
+        label: item.label,
+        value: item.value,
+        format: "text",
+      })),
+      action: "Converse comigo sobre o resultado antes de escolher a próxima missão.",
+      confidence: "medium",
+      follow_up: [
+        "O que este resultado significa?",
+        "Qual deve ser minha próxima missão?",
+        "Posso expandir agora?",
+      ],
+      snapshot_id: nextDashboard.snapshot.snapshot_id,
+    });
+    renderMentor(nextDashboard);
+    renderSessionReview(review);
+    containerScrollIntoView("#session-review");
+  } catch (error) {
+    showToast(error.message || "O save foi importado, mas a comparação falhou.", true);
+  }
+}
+
+function containerScrollIntoView(selector) {
+  document.querySelector(selector)?.scrollIntoView({behavior: "smooth", block: "start"});
 }
 
 function renderMetrics(data) {
@@ -251,25 +677,109 @@ function renderDiagnostic(data) {
 function renderActionPlan(data) {
   const container = document.querySelector("#action-plan");
   clear(container);
-  const actions = data.action_plan || [];
-  document.querySelector("#action-count").textContent = actions.length;
-  for (const item of actions) {
+  const quests = data.quests || [];
+  const activeState = loadQuestState(data.selected_campaign_id);
+  document.querySelector("#action-count").textContent = quests.length;
+  for (const item of quests) {
+    const isActive = activeState?.quest_id === item.quest_id;
     const card = element("article", "action-card");
+    card.classList.toggle("active", isActive);
     card.appendChild(element("span", "action-rank", item.rank));
     card.appendChild(element("p", "action-kicker", `Confiança ${confidenceLabels[item.confidence] || item.confidence}`));
     card.appendChild(element("h3", "", item.title));
-    card.appendChild(element("p", "action-command", item.action));
+    card.appendChild(element("p", "action-command", item.objective));
     const why = element("div", "action-explain");
     why.appendChild(element("strong", "", "Por quê"));
-    why.appendChild(element("p", "", item.why));
+    why.appendChild(element("p", "", item.briefing));
     card.appendChild(why);
     const success = element("div", "success-box");
     success.appendChild(element("span", "", "✓ Sinal de conclusão"));
     success.appendChild(element("p", "", item.success));
     card.appendChild(success);
     card.appendChild(element("small", "", item.impact));
+    const reward = element("div", "quest-reward");
+    reward.appendChild(element("span", "", item.reward.icon));
+    reward.appendChild(element("strong", "", `Recompensa: ${item.reward.label}`));
+    card.appendChild(reward);
+    const accept = element(
+      "button",
+      isActive ? "secondary-button quest-accept active" : "secondary-button quest-accept",
+      isActive ? "Missão ativa" : "Assumir missão",
+    );
+    accept.type = "button";
+    accept.dataset.questId = item.quest_id;
+    accept.disabled = isActive;
+    accept.addEventListener("click", () => acceptQuest(data, item.quest_id));
+    card.appendChild(accept);
     container.appendChild(card);
   }
+}
+
+function acceptQuest(data, questId) {
+  const quest = (data.quests || []).find((item) => item.quest_id === questId);
+  const state = {
+    quest_id: questId,
+    quest,
+    completed: [true, false, false],
+    started_snapshot_id: data.snapshot.snapshot_id,
+    baseline_campaign_id: data.selected_campaign_id,
+  };
+  saveQuestState(data.selected_campaign_id, state);
+  renderActionPlan(data);
+  renderActiveQuest(data);
+  document.querySelector("#active-quest").scrollIntoView({behavior: "smooth", block: "center"});
+  showToast("Missão assumida. O primeiro passo já foi concluído.");
+}
+
+function renderActiveQuest(data) {
+  const container = document.querySelector("#active-quest");
+  const state = loadQuestState(data.selected_campaign_id);
+  const quest = (
+    (data.quests || []).find((item) => item.quest_id === state?.quest_id) ||
+    state?.quest
+  );
+  if (!state || !quest) {
+    container.classList.add("hidden");
+    return;
+  }
+  container.classList.remove("hidden");
+  document.querySelector("#active-quest-title").textContent = quest.title;
+  document.querySelector("#active-quest-objective").textContent = quest.objective;
+  const checklist = document.querySelector("#quest-checklist");
+  clear(checklist);
+  const completed = Array.isArray(state.completed)
+    ? [...state.completed, false, false, false].slice(0, 3)
+    : [true, false, false];
+  quest.ritual.forEach((label, index) => {
+    const row = element("label", "quest-check");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = Boolean(completed[index]);
+    input.disabled = index === 2;
+    if (index === 2) {
+      input.title = "Esta etapa é concluída automaticamente ao importar outro export.";
+    }
+    input.addEventListener("change", () => {
+      completed[index] = input.checked;
+      saveQuestState(data.selected_campaign_id, {
+        quest_id: quest.quest_id,
+        completed,
+      });
+      renderActiveQuest(data);
+      if (completed.every(Boolean)) {
+        showToast("Missão concluída. O próximo export revelará o impacto.");
+      }
+    });
+    row.appendChild(input);
+    row.appendChild(element("span", "", label));
+    checklist.appendChild(row);
+  });
+  const done = completed.filter(Boolean).length;
+  document.querySelector("#quest-progress-label").textContent = `${done}/3`;
+  document.querySelector("#quest-progress-bar").style.width = `${(done / 3) * 100}%`;
+  document.querySelector("#quest-import-button").textContent =
+    completed[2] ? "Novo export já avaliado" : "Trazer novo export para avaliação";
+  document.querySelector("#quest-import-button").disabled = Boolean(completed[2]);
 }
 
 function renderRecommendations(data) {
@@ -549,9 +1059,12 @@ function render(data) {
     return;
   }
   renderMessage(data);
+  renderStory(data);
+  renderMentor(data);
   renderMetrics(data);
   renderDiagnostic(data);
   renderActionPlan(data);
+  renderActiveQuest(data);
   renderRecommendations(data);
   renderAvailability(data);
   renderOperations(data);
@@ -559,8 +1072,10 @@ function render(data) {
   renderPortfolio(data);
   renderWorkforce(data);
   renderTimeline(data);
+  renderSessionReview();
   document.querySelector("#comparison-result").classList.add("hidden");
   document.querySelector("#comparison-empty").classList.remove("hidden");
+  ui.importButtonLabel.textContent = "Trazer novo export";
   setView("dashboard");
 }
 
@@ -601,6 +1116,12 @@ async function compareCampaigns() {
 
 async function importArchive(file) {
   if (!file) return;
+  const previousDashboard = currentDashboard?.status === "ready"
+    ? currentDashboard
+    : null;
+  const activeQuest = previousDashboard
+    ? loadQuestState(previousDashboard.selected_campaign_id)
+    : null;
   ui.importButton.disabled = true;
   ui.importButtonLabel.textContent = "Analisando…";
   const form = new FormData();
@@ -610,12 +1131,23 @@ async function importArchive(file) {
     const data = await response.json();
     if (!response.ok || data.error) throw new Error(data.error || "Falha na importação.");
     render(data.dashboard);
-    showToast(data.import.deduplicated ? "Este export já estava no grimório." : "Save analisado. O Conselho foi atualizado.");
+    showToast(
+      data.import.deduplicated
+        ? "Este export já estava no grimório."
+        : "Novo capítulo analisado. O Alquimista está avaliando a sessão.",
+    );
+    await evaluateReturn(
+      previousDashboard,
+      data.dashboard,
+      activeQuest,
+      data.import.deduplicated,
+    );
   } catch (error) {
     showToast(error.message || "Não foi possível importar o save.", true);
   } finally {
     ui.importButton.disabled = false;
-    ui.importButtonLabel.textContent = "Importar save";
+    ui.importButtonLabel.textContent =
+      currentDashboard?.status === "ready" ? "Trazer novo export" : "Importar save";
     ui.archiveInput.value = "";
   }
 }
@@ -625,6 +1157,14 @@ for (const trigger of document.querySelectorAll(".import-trigger")) {
   trigger.addEventListener("click", () => ui.archiveInput.click());
 }
 document.querySelector("#glossary-button").addEventListener("click", () => openHelp("overview"));
+document.querySelector("#story-help-button").addEventListener("click", showOnboarding);
+document.querySelector("#mentor-hero-button").addEventListener("click", () => {
+  containerScrollIntoView("#mentor");
+  window.setTimeout(() => ui.mentorInput.focus(), 450);
+});
+document.querySelector("#primary-quest-button").addEventListener("click", () => {
+  document.querySelector("#plan").scrollIntoView({behavior: "smooth", block: "start"});
+});
 document.querySelector("#help-close").addEventListener("click", () => ui.helpDialog.close());
 ui.helpDialog.addEventListener("click", (event) => {
   if (event.target === ui.helpDialog) ui.helpDialog.close();
@@ -635,5 +1175,59 @@ for (const button of document.querySelectorAll(".help-button")) {
 ui.archiveInput.addEventListener("change", () => importArchive(ui.archiveInput.files[0]));
 ui.campaignSelect.addEventListener("change", () => loadDashboard(ui.campaignSelect.value));
 ui.compareButton.addEventListener("click", compareCampaigns);
+ui.mentorForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  askMentor(ui.mentorInput.value);
+});
+for (const button of document.querySelectorAll("[data-question]")) {
+  button.addEventListener("click", () => askMentor(button.dataset.question));
+}
+document.querySelector("#quest-import-button").addEventListener("click", () => {
+  ui.archiveInput.click();
+});
+document.querySelector("#review-mentor-button").addEventListener("click", () => {
+  containerScrollIntoView("#mentor");
+  ui.mentorInput.value = "O que este resultado significa para minha próxima decisão?";
+  window.setTimeout(() => ui.mentorInput.focus(), 450);
+});
+document.querySelector("#review-dismiss-button").addEventListener("click", () => {
+  saveLastReview(null);
+  renderSessionReview(null);
+  showToast("O retorno foi guardado. A conversa continua na Sala de Conselho.");
+});
+document.querySelector("#abandon-quest-button").addEventListener("click", () => {
+  if (!currentDashboard) return;
+  saveQuestState(currentDashboard.selected_campaign_id, null);
+  renderActionPlan(currentDashboard);
+  renderActiveQuest(currentDashboard);
+  document.querySelector("#plan").scrollIntoView({behavior: "smooth", block: "start"});
+  showToast("Missão liberada. Escolha um novo objetivo.");
+});
+document.querySelector("#details-toggle").addEventListener("click", (event) => {
+  const open = document.body.classList.toggle("details-open");
+  event.currentTarget.textContent = open ? "Fechar painel completo" : "Abrir painel completo";
+  if (open) document.querySelector("#diagnostic").scrollIntoView({behavior: "smooth", block: "start"});
+});
+document.querySelector("#onboarding-close").addEventListener("click", () => {
+  localStorage.setItem("o-alquimista.onboarding.v1", "seen");
+  ui.onboardingDialog.close();
+});
+document.querySelector("#onboarding-start").addEventListener("click", () => {
+  localStorage.setItem("o-alquimista.onboarding.v1", "seen");
+  ui.onboardingDialog.close();
+  document.querySelector("#overview").scrollIntoView({behavior: "smooth", block: "start"});
+});
+for (const link of document.querySelectorAll(".nav-item")) {
+  link.addEventListener("click", () => {
+    const target = document.querySelector(link.getAttribute("href"));
+    if (target?.hasAttribute("data-advanced")) {
+      document.body.classList.add("details-open");
+      document.querySelector("#details-toggle").textContent = "Fechar painel completo";
+    }
+  });
+}
 
 loadDashboard();
+if (!localStorage.getItem("o-alquimista.onboarding.v1")) {
+  window.setTimeout(showOnboarding, 450);
+}

@@ -6,6 +6,7 @@ import sqlite3
 import tempfile
 import threading
 import webbrowser
+import json
 from email import policy
 from email.parser import BytesParser
 from http import HTTPStatus
@@ -13,7 +14,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from .advisor import build_advisor_comparison, build_dashboard
+from .advisor import (
+    answer_mentor_question,
+    build_advisor_comparison,
+    build_dashboard,
+)
 from .database import AlquimistaDatabase
 from .errors import AdvisorUiError, AlquimistaError
 from .identity import resolve_campaign_identity
@@ -27,6 +32,10 @@ STATIC_FILES = {
     "/index.html": ("index.html", "text/html; charset=utf-8"),
     "/styles.css": ("styles.css", "text/css; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/assets/alchemist-portrait-v1.png": (
+        "assets/alchemist-portrait-v1.png",
+        "image/png",
+    ),
 }
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
@@ -150,6 +159,8 @@ class AdvisorRequestHandler(BaseHTTPRequestHandler):
                 "baseline_campaign_id",
                 [None],
             )[0]
+            current_snapshot_id = query.get("current_snapshot_id", [None])[0]
+            baseline_snapshot_id = query.get("baseline_snapshot_id", [None])[0]
             if not current_campaign_id or not baseline_campaign_id:
                 self._send_json(
                     {"error": "Selecione os dois momentos para comparar."},
@@ -161,6 +172,8 @@ class AdvisorRequestHandler(BaseHTTPRequestHandler):
                     AlquimistaDatabase(self.database_path),
                     current_campaign_id=current_campaign_id,
                     baseline_campaign_id=baseline_campaign_id,
+                    current_snapshot_id=current_snapshot_id,
+                    baseline_snapshot_id=baseline_snapshot_id,
                 )
             except (AlquimistaError, sqlite3.Error, ValueError) as exc:
                 self._send_json(
@@ -190,7 +203,7 @@ class AdvisorRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - API de BaseHTTPRequestHandler
         target = urlsplit(self.path)
-        if target.path != "/api/import":
+        if target.path not in {"/api/import", "/api/mentor"}:
             self._send_json(
                 {"error": "Recurso não encontrado."},
                 status=HTTPStatus.NOT_FOUND,
@@ -201,6 +214,44 @@ class AdvisorRequestHandler(BaseHTTPRequestHandler):
                 {"error": "A interface aceita somente conexões locais."},
                 status=HTTPStatus.FORBIDDEN,
             )
+            return
+        if target.path == "/api/mentor":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = 0
+            if length <= 0 or length > 16 * 1024:
+                self._send_json(
+                    {"error": "A pergunta está vazia ou excede o limite."},
+                    status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                )
+                return
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+                if not isinstance(body, dict):
+                    raise ValueError("A consulta ao mentor é inválida.")
+                campaign_id = str(body.get("campaign_id") or "")
+                question = str(body.get("question") or "")
+                if not campaign_id:
+                    raise ValueError("Selecione uma campanha antes de perguntar.")
+                payload = answer_mentor_question(
+                    AlquimistaDatabase(self.database_path),
+                    campaign_id=campaign_id,
+                    question=question,
+                )
+            except (
+                AlquimistaError,
+                OSError,
+                sqlite3.Error,
+                UnicodeError,
+                ValueError,
+            ) as exc:
+                self._send_json(
+                    {"error": str(exc)},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            self._send_json(payload)
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))

@@ -8,7 +8,7 @@ import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from o_alquimista.advisor import build_dashboard
+from o_alquimista.advisor import answer_mentor_question, build_dashboard
 from o_alquimista.database import AlquimistaDatabase
 from o_alquimista.errors import AdvisorUiError
 from o_alquimista.ui_server import (
@@ -94,6 +94,14 @@ class AdvisorProjectionTests(unittest.TestCase):
             self.assertIn("portfolio", dashboard)
             self.assertIn("workforce", dashboard)
             self.assertIn("availability", dashboard)
+            self.assertEqual(
+                dashboard["story"]["chapter_id"],
+                "awakening",
+            )
+            self.assertEqual(len(dashboard["story"]["path"]), 4)
+            self.assertTrue(dashboard["quests"])
+            self.assertIn("ritual", dashboard["quests"][0])
+            self.assertTrue(dashboard["achievements"])
             serialized = json.dumps(dashboard, ensure_ascii=False)
             self.assertNotIn("unknown_fields", serialized)
             self.assertNotIn('"raw"', serialized)
@@ -117,6 +125,7 @@ class AdvisorProjectionTests(unittest.TestCase):
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             campaign_ids: list[str] = []
+            snapshot_ids: list[str] = []
             try:
                 for archive in (first, second):
                     content_type, body = _multipart(
@@ -142,10 +151,13 @@ class AdvisorProjectionTests(unittest.TestCase):
                     connection.close()
                     self.assertEqual(response.status, 200)
                     campaign_ids.append(payload["import"]["campaign_id"])
+                    snapshot_ids.append(payload["import"]["snapshot_id"])
                 query = (
                     "/api/comparison?"
                     f"current_campaign_id={campaign_ids[1]}&"
-                    f"baseline_campaign_id={campaign_ids[0]}"
+                    f"baseline_campaign_id={campaign_ids[0]}&"
+                    f"current_snapshot_id={snapshot_ids[1]}&"
+                    f"baseline_snapshot_id={snapshot_ids[0]}"
                 )
                 connection = http.client.HTTPConnection(
                     "127.0.0.1",
@@ -177,9 +189,95 @@ class AdvisorProjectionTests(unittest.TestCase):
             self.assertNotIn('"raw"', serialized)
             self.assertNotIn("synthetic-storage-guid", serialized)
 
+    def test_mentor_answers_are_grounded_and_available_through_local_api(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database_path = root / "advisor.sqlite3"
+            archive = root / "save.zip"
+            _create_zip(archive)
+            content_type, body = _multipart(archive.name, archive.read_bytes())
+            server = ThreadingHTTPServer(
+                ("127.0.0.1", 0),
+                handler_factory(database_path),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                connection = http.client.HTTPConnection(
+                    "127.0.0.1",
+                    server.server_port,
+                    timeout=10,
+                )
+                connection.request(
+                    "POST",
+                    "/api/import",
+                    body=body,
+                    headers={
+                        "Content-Type": content_type,
+                        "Content-Length": str(len(body)),
+                    },
+                )
+                response = connection.getresponse()
+                imported = json.loads(response.read().decode("utf-8"))
+                connection.close()
+                self.assertEqual(response.status, 200)
+
+                mentor_body = json.dumps(
+                    {
+                        "campaign_id": imported["import"]["campaign_id"],
+                        "question": "Posso expandir com segurança?",
+                    }
+                ).encode("utf-8")
+                connection = http.client.HTTPConnection(
+                    "127.0.0.1",
+                    server.server_port,
+                    timeout=10,
+                )
+                connection.request(
+                    "POST",
+                    "/api/mentor",
+                    body=mentor_body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Content-Length": str(len(mentor_body)),
+                    },
+                )
+                response = connection.getresponse()
+                reply = json.loads(response.read().decode("utf-8"))
+                connection.close()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+            self.assertEqual(response.status, 200)
+            self.assertEqual(reply["topic"], "expansion")
+            self.assertTrue(reply["evidence"])
+            self.assertTrue(reply["action"])
+            self.assertIn("ROI", reply["caution"])
+            serialized = json.dumps(reply, ensure_ascii=False)
+            self.assertNotIn("unknown_fields", serialized)
+            self.assertNotIn('"raw"', serialized)
+
+    def test_mentor_rejects_empty_question(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            database = AlquimistaDatabase(Path(temporary) / "advisor.sqlite3")
+            with self.assertRaisesRegex(ValueError, "Escreva uma pergunta"):
+                answer_mentor_question(
+                    database,
+                    campaign_id="campaign",
+                    question="   ",
+                )
+
     def test_static_assets_are_packaged_and_health_endpoint_is_local(self) -> None:
         for filename in ("index.html", "styles.css", "app.js"):
             self.assertTrue((UI_ROOT / filename).is_file(), filename)
+        self.assertTrue(
+            (UI_ROOT / "assets" / "alchemist-portrait-v1.png").is_file()
+        )
+        html = (UI_ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="mentor"', html)
+        self.assertIn('id="session-review"', html)
 
         with tempfile.TemporaryDirectory() as temporary:
             server = ThreadingHTTPServer(

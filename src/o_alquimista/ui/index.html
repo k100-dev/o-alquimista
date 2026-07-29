@@ -19,11 +19,11 @@
         </a>
 
         <nav class="nav-list" aria-label="Navegação principal">
-          <a class="nav-item active" href="#overview"><span>◈</span> Visão geral</a>
-          <a class="nav-item" href="#plan"><span>✦</span> Plano de agora</a>
-          <a class="nav-item" href="#operation"><span>⌂</span> Operação</a>
-          <a class="nav-item" href="#portfolio"><span>◇</span> Portfólio</a>
-          <a class="nav-item" href="#comparison"><span>⇄</span> Comparação</a>
+          <a class="nav-item active" href="#overview"><span>◈</span> Jornada</a>
+          <a class="nav-item" href="#mentor"><span>△</span> Mentor</a>
+          <a class="nav-item" href="#plan"><span>✦</span> Missões</a>
+          <a class="nav-item" href="#campaign-loop"><span>↻</span> Ciclo</a>
+          <a class="nav-item" href="#operation"><span>⌂</span> Dados</a>
           <a class="nav-item" href="#chronicles"><span>◷</span> Memória</a>
         </nav>
 
@@ -77,26 +77,173 @@
         </section>
 
         <div id="dashboard" class="dashboard hidden">
-          <section id="overview" class="advisor-hero">
-            <div class="advisor-copy">
+          <section id="overview" class="story-hero">
+            <div class="story-copy">
               <div class="snapshot-notice">
                 <span class="status-dot"></span>
                 <span id="snapshot-explanation">Fotografia do último export</span>
               </div>
-              <p id="message-eyebrow" class="eyebrow">Conselho prioritário</p>
-              <h2 id="message-title">Observe antes de expandir</h2>
-              <p id="message-body"></p>
+              <p class="eyebrow">
+                Capítulo <span id="chapter-number">—</span> ·
+                <span id="chapter-title">A jornada</span>
+              </p>
+              <h2 id="story-headline">O próximo movimento começa aqui.</h2>
+              <p id="story-narrative" class="story-narrative"></p>
+              <div class="advisor-speech">
+                <span class="speech-sigil" aria-hidden="true">Δ</span>
+                <div>
+                  <small>O Alquimista aconselha</small>
+                  <strong id="message-title">Observe antes de expandir</strong>
+                  <p id="message-body"></p>
+                </div>
+              </div>
+              <div class="hero-actions">
+                <button id="mentor-hero-button" class="primary-button" type="button">
+                  Conversar com o mentor
+                </button>
+                <button id="primary-quest-button" class="secondary-button" type="button">
+                  Ver missão
+                </button>
+                <button id="story-help-button" class="ghost-button" type="button">
+                  Como funciona?
+                </button>
+              </div>
               <div class="hero-meta">
                 <span id="snapshot-day" class="chip">Dia —</span>
                 <span id="snapshot-time" class="chip">hora —</span>
-                <span id="game-version" class="chip">versão —</span>
+                <span id="game-rank" class="chip">rank —</span>
                 <span id="confidence-chip" class="chip confidence">confiança —</span>
               </div>
             </div>
-            <div class="oracle" aria-hidden="true">
-              <div class="oracle-ring ring-one"></div>
-              <div class="oracle-ring ring-two"></div>
-              <div class="oracle-core">Δ</div>
+            <div class="character-stage" aria-label="Retrato do Alquimista">
+              <img
+                src="/assets/alchemist-portrait-v1.png"
+                alt="O Alquimista, mentor estratégico da campanha"
+              >
+              <div class="character-caption">
+                <span class="status-dot"></span>
+                <div><strong>O Alquimista</strong><small>mentor ativo</small></div>
+              </div>
+            </div>
+          </section>
+
+          <section id="mentor" class="mentor-console" aria-label="Conversa com o Alquimista">
+            <div class="mentor-console-head">
+              <div class="mentor-identity">
+                <img src="/assets/alchemist-portrait-v1.png" alt="">
+                <div>
+                  <p class="eyebrow">Sala de Conselho</p>
+                  <h2>Converse com o Alquimista</h2>
+                  <p>
+                    Pergunte sobre sua decisão atual. A resposta usa apenas o
+                    export selecionado e mostra as evidências consideradas.
+                  </p>
+                </div>
+              </div>
+              <span class="local-badge"><span class="status-dot"></span> consulta local</span>
+            </div>
+            <div id="mentor-messages" class="mentor-messages" aria-live="polite"></div>
+            <div id="mentor-suggestions" class="mentor-suggestions" aria-label="Perguntas sugeridas">
+              <button type="button" data-question="O que devo fazer agora?">O que faço agora?</button>
+              <button type="button" data-question="Posso expandir com segurança?">Posso expandir?</button>
+              <button type="button" data-question="Onde está o gargalo?">Onde está o gargalo?</button>
+              <button type="button" data-question="O que o próximo export vai provar?">Por que exportar de novo?</button>
+            </div>
+            <form id="mentor-form" class="mentor-form">
+              <label class="sr-only" for="mentor-input">Pergunta para o Alquimista</label>
+              <input
+                id="mentor-input"
+                maxlength="500"
+                autocomplete="off"
+                placeholder="Ex.: vale contratar ou comprar outra propriedade?"
+              >
+              <button id="mentor-send" class="primary-button" type="submit">Perguntar</button>
+            </form>
+            <p class="mentor-disclaimer">
+              O mentor não usa internet nem inventa dados ausentes. Quando não
+              houver evidência suficiente, ele dirá o que o próximo export precisa provar.
+            </p>
+          </section>
+
+          <section id="campaign-loop" class="campaign-loop" aria-label="Ciclo de acompanhamento">
+            <div class="loop-copy">
+              <p class="eyebrow">O propósito do companion</p>
+              <h2>Uma conversa que evolui com a sua campanha</h2>
+              <p>Não é um relatório isolado: cada retorno melhora o próximo conselho.</p>
+            </div>
+            <div class="loop-steps">
+              <article class="current"><span>1</span><strong>Converse</strong><small>defina a dúvida</small></article>
+              <article><span>2</span><strong>Assuma</strong><small>escolha uma missão</small></article>
+              <article><span>3</span><strong>Jogue</strong><small>mude uma coisa</small></article>
+              <article><span>4</span><strong>Exporte</strong><small>traga o novo momento</small></article>
+              <article><span>5</span><strong>Aprenda</strong><small>avalie o resultado</small></article>
+            </div>
+          </section>
+
+          <section class="journey-strip" aria-label="Jornada da campanha">
+            <div class="journey-heading">
+              <div>
+                <p class="eyebrow">Sua jornada</p>
+                <h2>O caminho da operação</h2>
+              </div>
+              <small id="story-note"></small>
+            </div>
+            <div id="story-path" class="story-path"></div>
+            <div class="journey-footer">
+              <span>Próximo desbloqueio</span>
+              <strong id="next-unlock">—</strong>
+            </div>
+          </section>
+
+          <section id="achievement-strip" class="achievement-strip" aria-label="Selos da jornada"></section>
+
+          <section id="active-quest" class="active-quest hidden" aria-live="polite">
+            <div class="active-quest-copy">
+              <p class="eyebrow">Missão ativa</p>
+              <h2 id="active-quest-title">—</h2>
+              <p id="active-quest-objective"></p>
+            </div>
+            <div class="quest-progress">
+              <div class="quest-progress-head">
+                <span>Progresso da missão</span>
+                <strong id="quest-progress-label">0/3</strong>
+              </div>
+              <div class="bar-track"><div id="quest-progress-bar" class="bar-fill"></div></div>
+              <div id="quest-checklist" class="quest-checklist"></div>
+            </div>
+            <button id="abandon-quest-button" class="text-button" type="button">
+              Trocar missão
+            </button>
+            <button id="quest-import-button" class="primary-button quest-return-button" type="button">
+              Trazer novo export para avaliação
+            </button>
+          </section>
+
+          <section id="session-review" class="session-review hidden" aria-live="polite">
+            <div class="session-review-head">
+              <div>
+                <p class="eyebrow">Retorno à Câmara</p>
+                <h2 id="review-title">O Alquimista leu o novo capítulo</h2>
+                <p id="review-body"></p>
+              </div>
+              <span id="review-verdict" class="review-verdict">evidência recebida</span>
+            </div>
+            <div id="review-deltas" class="review-deltas"></div>
+            <div class="review-judgment">
+              <span class="speech-sigil" aria-hidden="true">△</span>
+              <div>
+                <small>Julgamento da missão</small>
+                <strong id="review-quest-title">Sessão registrada</strong>
+                <p id="review-quest-body"></p>
+              </div>
+            </div>
+            <div class="review-actions">
+              <button id="review-mentor-button" class="primary-button" type="button">
+                Conversar sobre o resultado
+              </button>
+              <button id="review-dismiss-button" class="text-button" type="button">
+                Guardar nas Crônicas
+              </button>
             </div>
           </section>
 
@@ -139,7 +286,7 @@
             </article>
           </section>
 
-          <section id="diagnostic" class="panel diagnostic-panel">
+          <section id="diagnostic" class="panel diagnostic-panel" data-advanced>
             <div class="diagnostic-score">
               <div id="decision-score" class="score-ring"><strong>—</strong><span>/100</span></div>
               <div>
@@ -154,10 +301,10 @@
           <section id="plan" class="panel">
             <div class="section-heading">
               <div>
-                <p class="eyebrow">Ordem de execução</p>
-                <h2>Seu plano de agora</h2>
+                <p class="eyebrow">Escolha seu objetivo</p>
+                <h2>Quadro de missões</h2>
                 <p class="section-description">
-                  Três movimentos práticos, em ordem, com motivo e sinal de conclusão.
+                  Assuma uma missão, jogue normalmente e volte com um novo export para validar o resultado.
                 </p>
               </div>
               <span id="action-count" class="count-badge">0</span>
@@ -165,7 +312,19 @@
             <div id="action-plan" class="action-grid"></div>
           </section>
 
-          <div class="content-grid">
+          <section class="details-gate">
+            <p class="eyebrow">Aprofundar análise</p>
+            <h2>Quer investigar os números?</h2>
+            <p>
+              O modo de jornada mostra apenas o necessário para agir. Abra o
+              painel completo quando quiser entender cada evidência.
+            </p>
+            <button id="details-toggle" class="secondary-button" type="button">
+              Abrir painel completo
+            </button>
+          </section>
+
+          <div class="content-grid" data-advanced>
             <section id="counsel" class="panel counsel-panel">
               <div class="section-heading">
                 <div>
@@ -192,7 +351,7 @@
             </section>
           </div>
 
-          <section id="operation" class="panel">
+          <section id="operation" class="panel" data-advanced>
             <div class="section-heading">
               <div>
                 <p class="eyebrow">Capacidade instalada</p>
@@ -206,7 +365,7 @@
             <div id="category-bars" class="category-bars"></div>
           </section>
 
-          <section id="laboratories" class="panel">
+          <section id="laboratories" class="panel" data-advanced>
             <div class="section-heading">
               <div>
                 <p class="eyebrow">Propriedades possuídas</p>
@@ -220,7 +379,7 @@
             <div id="property-grid" class="property-grid"></div>
           </section>
 
-          <section id="portfolio" class="panel">
+          <section id="portfolio" class="panel" data-advanced>
             <div class="section-heading">
               <div>
                 <p class="eyebrow">Produtos e receitas</p>
@@ -234,7 +393,7 @@
             <div id="product-list" class="product-list"></div>
           </section>
 
-          <section id="workforce" class="panel">
+          <section id="workforce" class="panel" data-advanced>
             <div class="section-heading">
               <div>
                 <p class="eyebrow">Delegação</p>
@@ -247,7 +406,7 @@
             <div id="workforce-content" class="workforce-grid"></div>
           </section>
 
-          <section id="comparison" class="panel comparison-panel">
+          <section id="comparison" class="panel comparison-panel" data-advanced>
             <div class="section-heading">
               <div>
                 <p class="eyebrow">Transmutação temporal</p>
@@ -272,7 +431,7 @@
             <div id="comparison-result" class="comparison-result hidden"></div>
           </section>
 
-          <section id="chronicles" class="panel">
+          <section id="chronicles" class="panel" data-advanced>
             <div class="section-heading">
               <div>
                 <p class="eyebrow">Memória da campanha</p>
@@ -291,6 +450,22 @@
       <h2 id="help-title">Entenda este indicador</h2>
       <p id="help-body"></p>
       <div id="help-details" class="help-details"></div>
+    </dialog>
+
+    <dialog id="onboarding-dialog" class="onboarding-dialog">
+      <button id="onboarding-close" class="dialog-close" type="button" aria-label="Fechar">×</button>
+      <p class="eyebrow">O ritual da campanha</p>
+      <h2>O Alquimista transforma cada export em uma conversa que evolui.</h2>
+      <div class="onboarding-steps">
+        <article><span>1</span><div><strong>Converse</strong><p>Conte sua dúvida e veja as evidências do mentor.</p></div></article>
+        <article><span>2</span><div><strong>Escolha</strong><p>Assuma uma missão que resolve o problema prioritário.</p></div></article>
+        <article><span>3</span><div><strong>Jogue</strong><p>Mude uma coisa por vez no Schedule I.</p></div></article>
+        <article><span>4</span><div><strong>Retorne</strong><p>Importe o próximo save sem preencher formulários.</p></div></article>
+        <article><span>5</span><div><strong>Aprenda</strong><p>O Alquimista compara, julga a missão e inicia o próximo ciclo.</p></div></article>
+      </div>
+      <button id="onboarding-start" class="primary-button" type="button">
+        Entendi. Mostrar minha jornada
+      </button>
     </dialog>
 
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
