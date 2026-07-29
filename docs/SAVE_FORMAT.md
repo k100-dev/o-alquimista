@@ -29,6 +29,21 @@ Arquivos opcionais observados incluem `Game.json`,
 `Players/*/Inventory.json`, `WorldStorageEntities.json`,
 `Properties/*.json`, `Businesses/*.json`, `NPCs.json` e `Vehicles.json`.
 
+### Objetos de propriedades
+
+Na versão `0.4.5f2`, objetos em `Properties/*.json` foram observados com:
+
+- `DataType`, que descreve a estrutura serializada;
+- `BaseData.ItemString.ID`, que identifica o item instalado;
+- `BaseData.GUID`, usado apenas para gerar um identificador pseudonimizado;
+- recipientes como `Contents`, `MixerContents`, `OutputContents` e
+  `ProductContents`;
+- estados como `PlantData`, `CurrentMixOperation`, `CurrentMixTime` e `IsOn`.
+
+O número de entradas em `Items` representa slots observados. Slots ocupados são
+aqueles com item e quantidade positiva. Esses valores não comprovam throughput
+ou capacidade produtiva por hora.
+
 Para players, inventário, armazenamento mundial, propriedades, negócios, NPCs,
 funcionários e veículos, o snapshot registra `availability`: `observed`,
 `missing`, `invalid` ou `unsupported`. Um diretório/arquivo presente e válido

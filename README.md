@@ -12,6 +12,11 @@ associações candidatas sem consolidação automática e precisão monetária c
 `Decimal`, preservando a operação estritamente read-only. Consulte o
 [Termo de Aceite Técnico](docs/MILESTONE_2_ACCEPTANCE.md).
 
+O desenvolvimento do Milestone 3, **Os Olhos do Alquimista**, ocorre na branch
+`feat/milestone-3-operacoes`. A primeira entrega decodifica objetos instalados,
+recipientes e estados operacionais observáveis. Consulte
+[docs/MILESTONE_3.md](docs/MILESTONE_3.md).
+
 Não há interface gráfica nem chamadas de rede neste milestone.
 
 ## Segurança read-only

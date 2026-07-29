@@ -22,6 +22,17 @@ SectionAvailabilityState = Literal[
     "invalid",
     "unsupported",
 ]
+OperationalCategory = Literal[
+    "cultivation",
+    "mixing",
+    "packaging",
+    "storage",
+    "utility",
+    "waste",
+    "fixture",
+    "unknown",
+]
+OperationalState = Literal["active", "idle", "unknown"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +160,30 @@ class Employee:
 
 
 @dataclass(frozen=True, slots=True)
+class OperationalContainer:
+    name: str
+    slot_count: int
+    occupied_slot_count: int
+    inventory: Inventory
+    origin: DataOrigin
+
+
+@dataclass(frozen=True, slots=True)
+class OperationalObject:
+    instance_id: str
+    item_id: str | None
+    data_type: str | None
+    category: OperationalCategory
+    operational_state: OperationalState
+    containers: tuple[OperationalContainer, ...]
+    state: dict[str, JsonValue]
+    origin: DataOrigin
+    raw: JsonValue = None
+    origins: dict[str, DataOrigin] = field(default_factory=dict)
+    unknown: tuple[UnknownField, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class Property:
     name: str
     code: str | None
@@ -161,6 +196,7 @@ class Property:
     raw: JsonValue = None
     origins: dict[str, DataOrigin] = field(default_factory=dict)
     employees: tuple[Employee, ...] = ()
+    objects: tuple[OperationalObject, ...] = ()
     unknown: tuple[UnknownField, ...] = ()
 
 

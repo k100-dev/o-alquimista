@@ -78,6 +78,45 @@ def build_markdown(snapshot: dict[str, Any]) -> str:
             f"{prop['employee_count']} | {prop['object_count']} |"
         )
 
+    lines += [
+        "",
+        "## Instalações observadas",
+        "",
+        "| Propriedade | Item | Categoria | Estado | Slots ocupados | Slots observados |",
+        "|---|---|---|---|---:|---:|",
+    ]
+    operational_rows = 0
+    for prop in snapshot["properties"]:
+        if not prop["owned"]:
+            continue
+        for operational_object in prop.get("objects", []):
+            containers = operational_object.get("containers", [])
+            occupied_slots = sum(
+                int(container.get("occupied_slot_count", 0))
+                for container in containers
+            )
+            slot_count = sum(
+                int(container.get("slot_count", 0))
+                for container in containers
+            )
+            lines.append(
+                f"| {prop['name']} | "
+                f"`{operational_object.get('item_id') or 'desconhecido'}` | "
+                f"{operational_object.get('category', 'unknown')} | "
+                f"{operational_object.get('operational_state', 'unknown')} | "
+                f"{occupied_slots} | {slot_count} |"
+            )
+            operational_rows += 1
+    if not operational_rows:
+        lines.append("| — | — | — | — | 0 | 0 |")
+    lines += [
+        "",
+        (
+            "> Slots representam recipientes observados no save; não equivalem "
+            "a throughput ou capacidade produtiva por hora."
+        ),
+    ]
+
     lines += ["", "## Observações", ""]
     owned = [prop for prop in snapshot["properties"] if prop["owned"]]
     staffed = [prop for prop in owned if prop["employee_count"] > 0]

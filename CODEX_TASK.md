@@ -10,12 +10,20 @@ disponibilidade de seções opcionais, evidências explícitas, timeline,
 comparação segura, marcos históricos reconstruíveis, recomendações e SQLite
 versionado.
 
-## Próximo objetivo sugerido
+## Objetivo atual
 
-Validar os normalizadores opcionais com fixtures sanitizadas de mais versões do
-jogo e ampliar métricas comprováveis de capacidade, despesas, fornecedores,
-clientes e atividades. Toda nova regra deve ter `rule_id`, evidência,
-informação contraditória, limitações e teste.
+Implementar o Milestone 3, **Os Olhos do Alquimista**, documentado em
+`docs/MILESTONE_3.md`.
+
+A prioridade é decodificar objetos operacionais presentes nas propriedades,
+começando por `BaseData`, `ItemString`, recipientes, cultivo, mistura e
+embalagem. Métricas devem permanecer estritamente observáveis ou derivadas.
+Throughput, lucro por hora e capacidade não podem ser inventados.
+
+Depois do perfil operacional, validar normalizadores opcionais com fixtures
+sanitizadas de mais versões do jogo e ampliar despesas, fornecedores, clientes
+e atividades. Toda nova regra deve ter `rule_id`, evidência, informação
+contraditória, limitações e teste.
 
 ## Definition of done contínua
 

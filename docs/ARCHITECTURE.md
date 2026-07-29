@@ -36,6 +36,7 @@ ZIP read-only
   canônica e restauração de snapshots persistidos;
 - `identity.py`: `ArchiveFingerprint` e `CampaignIdentity`;
 - `parser.py`: normalização read-only e preservação `raw/unknown`;
+- `models.py`: inclui objetos e recipientes operacionais imutáveis;
 - `memory_models.py`: evidência, timeline, comparação, marco e recomendação;
 - `evidence.py`: fábricas determinísticas das quatro categorias;
 - `analysis.py`: comparação, ordenação, marcos e regras de recomendação;
@@ -43,6 +44,18 @@ ZIP read-only
 - `memory_reports.py`: Markdown com seções epistemológicas separadas;
 - `cli.py`: adaptação de argumentos e apresentação;
 - `schedule_intelligence`: delegação de compatibilidade, sem lógica duplicada.
+
+## Objetos operacionais
+
+Objetos de propriedades podem armazenar seu estado em um envelope `BaseData`.
+O normalizador decodifica `ItemString.ID`, recipientes e os estados estruturais
+de cultivo, mistura e objetos alternáveis. O GUID observado é usado somente
+como entrada para um identificador pseudonimizado e determinístico; o
+identificador público não revela o GUID.
+
+Categorias operacionais derivam do `DataType` observado. Contagens de slots e
+ocupação são fatos estruturais do save. Elas não são tratadas como throughput,
+tempo de ciclo ou capacidade de produção por hora.
 
 ## Identidade e determinismo
 

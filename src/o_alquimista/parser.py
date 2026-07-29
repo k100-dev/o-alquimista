@@ -9,6 +9,7 @@ from typing import Any, Iterable
 
 from .archive import ESSENTIAL_FILES, extracted_save
 from .errors import IncompleteSaveError, InvalidArchiveError, SaveDataError
+from .evidence import deterministic_id
 from .identity import fingerprint_archive
 from .json_codec import loads as json_loads
 from .json_codec import to_finite_decimal
@@ -24,6 +25,8 @@ from .models import (
     NormalizedSnapshot,
     Npc,
     NpcCollection,
+    OperationalContainer,
+    OperationalObject,
     Product,
     ProductCatalog,
     Progression,
@@ -120,6 +123,27 @@ def _availability(
     )
 
 
+_OBJECT_CATEGORY_BY_DATA_TYPE = {
+    "PotData": "cultivation",
+    "MixingStationData": "mixing",
+    "PackagingStationData": "packaging",
+    "PlaceableStorageData": "storage",
+    "ToggleableItemData": "utility",
+    "TrashContainerData": "waste",
+    "GridItemData": "fixture",
+    "ProceduralGridItemData": "fixture",
+    "SurfaceItemData": "fixture",
+}
+_OBJECT_CONTAINER_FIELDS = (
+    "Contents",
+    "Inventory",
+    "StorageContents",
+    "MixerContents",
+    "OutputContents",
+    "ProductContents",
+)
+
+
 def _parse_items(
     values: list[Any] | None,
     relative_file: str,
@@ -149,6 +173,142 @@ def _parse_items(
             )
         )
     return parsed
+
+
+def _object_item_id(payload: dict[str, Any]) -> str | None:
+    item = payload.get("ItemString")
+    if isinstance(item, dict) and item.get("ID") is not None:
+        return str(item["ID"])
+    if isinstance(item, str) and item:
+        return item
+    return None
+
+
+def _operational_object(
+    raw_object: dict[str, Any],
+    *,
+    relative_file: str,
+    index: int,
+) -> OperationalObject:
+    base_data = raw_object.get("BaseData")
+    payload = base_data if isinstance(base_data, dict) else raw_object
+    payload_path = (
+        f"Objects[{index}].BaseData"
+        if isinstance(base_data, dict)
+        else f"Objects[{index}]"
+    )
+    data_type_value = (
+        raw_object.get("DataType")
+        or raw_object.get("ObjectType")
+        or payload.get("DataType")
+    )
+    data_type = str(data_type_value) if data_type_value is not None else None
+    item_id = _object_item_id(payload)
+    guid = payload.get("GUID")
+    instance_id = deterministic_id(
+        "object",
+        str(guid) if guid is not None else relative_file,
+        index if guid is None else None,
+        data_type,
+        item_id,
+    )
+
+    containers: list[OperationalContainer] = []
+    for container_name in _OBJECT_CONTAINER_FIELDS:
+        content = payload.get(container_name)
+        if not isinstance(content, dict) or not isinstance(content.get("Items"), list):
+            continue
+        field_prefix = f"{payload_path}.{container_name}.Items"
+        items = _parse_items(
+            content["Items"],
+            relative_file,
+            field_prefix,
+        )
+        containers.append(
+            OperationalContainer(
+                name=container_name,
+                slot_count=len(content["Items"]),
+                occupied_slot_count=len(items),
+                inventory=_summarize_items(items),
+                origin=_origin(
+                    relative_file,
+                    f"{payload_path}.{container_name}",
+                ),
+            )
+        )
+
+    category = _OBJECT_CATEGORY_BY_DATA_TYPE.get(data_type or "", "unknown")
+    operational_state = "unknown"
+    state: dict[str, Any] = {}
+    if data_type == "PotData":
+        plant = payload.get("PlantData")
+        has_plant = isinstance(plant, dict) and bool(plant.get("SeedID"))
+        operational_state = "active" if has_plant else "idle"
+        state["has_plant"] = has_plant
+        state["growth_progress"] = (
+            _metric_number(plant.get("GrowthProgress"))
+            if isinstance(plant, dict)
+            else None
+        )
+    elif data_type == "MixingStationData":
+        operation = payload.get("CurrentMixOperation")
+        has_operation = isinstance(operation, dict) and any(
+            value not in (None, "", 0, False, [], {})
+            for value in operation.values()
+        )
+        operational_state = "active" if has_operation else "idle"
+        state["has_operation"] = has_operation
+        state["current_mix_time"] = _metric_number(payload.get("CurrentMixTime"))
+    elif data_type == "ToggleableItemData" and isinstance(
+        payload.get("IsOn"),
+        bool,
+    ):
+        operational_state = "active" if payload["IsOn"] else "idle"
+        state["is_on"] = payload["IsOn"]
+
+    object_origin = f"Objects[{index}]"
+    return OperationalObject(
+        instance_id=instance_id,
+        item_id=item_id,
+        data_type=data_type,
+        category=category,
+        operational_state=operational_state,
+        containers=tuple(containers),
+        state=state,
+        origin=_origin(relative_file, object_origin),
+        raw=raw_object,
+        origins={
+            "instance_id": _origin(relative_file, f"{payload_path}.GUID"),
+            "item_id": _origin(
+                relative_file,
+                f"{payload_path}.ItemString.ID",
+            ),
+            "data_type": _origin(
+                relative_file,
+                (
+                    f"{object_origin}.DataType"
+                    if raw_object.get("DataType") is not None
+                    else f"{object_origin}.ObjectType"
+                ),
+            ),
+            "operational_state": _origin(
+                relative_file,
+                payload_path,
+            ),
+        },
+        unknown=_unknown_fields(
+            raw_object,
+            {
+                "AdditionalDatas",
+                "BaseData",
+                "DataType",
+                "DataVersion",
+                "GameVersion",
+                "ObjectType",
+            },
+            relative_file,
+        ),
+    )
 
 
 def _summarize_items(items: Iterable[InventoryItem]) -> Inventory:
@@ -191,21 +351,23 @@ def _property_summary(save_root: Path, path: Path) -> Property:
         data.get("Employees") if isinstance(data.get("Employees"), list) else []
     )
     object_types: Counter[str] = Counter()
+    operational_objects: list[OperationalObject] = []
     inventory_items: list[InventoryItem] = []
     for index, obj in enumerate(objects):
         if not isinstance(obj, dict):
             continue
-        object_types[str(obj.get("ObjectType", obj.get("DataType", "unknown")))] += 1
-        for key in ("Contents", "Inventory", "StorageContents"):
-            content = obj.get(key)
-            if isinstance(content, dict) and isinstance(content.get("Items"), list):
-                inventory_items.extend(
-                    _parse_items(
-                        content["Items"],
-                        relative,
-                        f"Objects[{index}].{key}.Items",
-                    )
-                )
+        operational_object = _operational_object(
+            obj,
+            relative_file=relative,
+            index=index,
+        )
+        operational_objects.append(operational_object)
+        object_types[operational_object.data_type or "unknown"] += 1
+        inventory_items.extend(
+            item
+            for container in operational_object.containers
+            for item in container.inventory.items
+        )
 
     employees = tuple(
         Employee(
@@ -245,10 +407,11 @@ def _property_summary(save_root: Path, path: Path) -> Property:
             ),
             "inventory": _origin(
                 relative,
-                "Objects[].Contents|Inventory|StorageContents.Items",
+                "Objects[].BaseData.*Contents.Items",
             ),
         },
         employees=employees,
+        objects=tuple(operational_objects),
         unknown=_unknown_fields(data, known, relative),
     )
 
