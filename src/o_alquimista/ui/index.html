@@ -14,23 +14,17 @@
           <span class="brand-sigil" aria-hidden="true">Δ</span>
           <span>
             <strong>O Alquimista</strong>
-            <small>conselheiro operacional</small>
+            <small>mentor da campanha</small>
           </span>
         </a>
 
         <nav class="nav-list" aria-label="Navegação principal">
-          <a class="nav-item active" href="#overview">
-            <span aria-hidden="true">◈</span> Câmara
-          </a>
-          <a class="nav-item" href="#counsel">
-            <span aria-hidden="true">✦</span> Conselho
-          </a>
-          <a class="nav-item" href="#laboratories">
-            <span aria-hidden="true">⌂</span> Laboratórios
-          </a>
-          <a class="nav-item" href="#chronicles">
-            <span aria-hidden="true">◷</span> Crônicas
-          </a>
+          <a class="nav-item active" href="#overview"><span>◈</span> Visão geral</a>
+          <a class="nav-item" href="#plan"><span>✦</span> Plano de agora</a>
+          <a class="nav-item" href="#operation"><span>⌂</span> Operação</a>
+          <a class="nav-item" href="#portfolio"><span>◇</span> Portfólio</a>
+          <a class="nav-item" href="#comparison"><span>⇄</span> Comparação</a>
+          <a class="nav-item" href="#chronicles"><span>◷</span> Memória</a>
         </nav>
 
         <div class="privacy-card">
@@ -50,9 +44,12 @@
           </div>
           <div class="topbar-actions">
             <label class="campaign-picker">
-              <span>Campanha</span>
-              <select id="campaign-select" aria-label="Selecionar campanha"></select>
+              <span>Export analisado</span>
+              <select id="campaign-select" aria-label="Selecionar export"></select>
             </label>
+            <button id="glossary-button" class="ghost-button" type="button">
+              <span aria-hidden="true">?</span> Entender a tela
+            </button>
             <button id="import-button" class="primary-button" type="button">
               <span class="import-icon" aria-hidden="true">＋</span>
               <span id="import-button-label">Importar save</span>
@@ -71,8 +68,8 @@
           <p class="eyebrow">A Câmara está vazia</p>
           <h2>Entregue seu primeiro export ao Alquimista</h2>
           <p>
-            Selecione o ZIP criado pelo jogo. A análise acontece somente
-            neste computador e o arquivo temporário é descartado.
+            Selecione o ZIP criado pelo jogo. A análise acontece somente neste
+            computador e o arquivo temporário é descartado.
           </p>
           <button class="primary-button import-trigger" type="button">
             Escolher export
@@ -82,11 +79,16 @@
         <div id="dashboard" class="dashboard hidden">
           <section id="overview" class="advisor-hero">
             <div class="advisor-copy">
+              <div class="snapshot-notice">
+                <span class="status-dot"></span>
+                <span id="snapshot-explanation">Fotografia do último export</span>
+              </div>
               <p id="message-eyebrow" class="eyebrow">Conselho prioritário</p>
               <h2 id="message-title">Observe antes de expandir</h2>
               <p id="message-body"></p>
               <div class="hero-meta">
                 <span id="snapshot-day" class="chip">Dia —</span>
+                <span id="snapshot-time" class="chip">hora —</span>
                 <span id="game-version" class="chip">versão —</span>
                 <span id="confidence-chip" class="chip confidence">confiança —</span>
               </div>
@@ -100,63 +102,174 @@
 
           <section class="metric-grid" aria-label="Indicadores principais">
             <article class="metric-card">
-              <span class="metric-icon gold" aria-hidden="true">$</span>
+              <div class="metric-top">
+                <span class="metric-icon gold">$</span>
+                <button class="help-button" data-help="liquidity" aria-label="Explicar liquidez">?</button>
+              </div>
               <p>Liquidez observada</p>
               <strong id="metric-liquidity">—</strong>
-              <small>saldo e dinheiro físico detectado</small>
+              <small>dinheiro disponível detectado no export</small>
             </article>
             <article class="metric-card">
-              <span class="metric-icon violet" aria-hidden="true">◆</span>
+              <div class="metric-top">
+                <span class="metric-icon violet">◆</span>
+                <button class="help-button" data-help="networth" aria-label="Explicar patrimônio">?</button>
+              </div>
               <p>Patrimônio</p>
               <strong id="metric-networth">—</strong>
-              <small>valor informado pelo save</small>
+              <small>valor total informado pelo jogo</small>
             </article>
             <article class="metric-card">
-              <span class="metric-icon green" aria-hidden="true">⌂</span>
-              <p>Estrutura</p>
+              <div class="metric-top">
+                <span class="metric-icon green">⌂</span>
+                <button class="help-button" data-help="productive" aria-label="Explicar base produtiva">?</button>
+              </div>
+              <p>Base produtiva</p>
               <strong id="metric-operations">—</strong>
-              <small id="metric-operations-detail">instalações observadas</small>
+              <small id="metric-operations-detail">equipamentos que produzem ou finalizam</small>
             </article>
             <article class="metric-card">
-              <span class="metric-icon cyan" aria-hidden="true">▦</span>
-              <p>Ocupação</p>
+              <div class="metric-top">
+                <span class="metric-icon cyan">▦</span>
+                <button class="help-button" data-help="storage" aria-label="Explicar armazenamento">?</button>
+              </div>
+              <p>Folga de armazenamento</p>
               <strong id="metric-occupancy">—</strong>
-              <small id="metric-occupancy-detail">slots observados</small>
+              <small id="metric-occupancy-detail">compartimentos livres observados</small>
             </article>
+          </section>
+
+          <section id="diagnostic" class="panel diagnostic-panel">
+            <div class="diagnostic-score">
+              <div id="decision-score" class="score-ring"><strong>—</strong><span>/100</span></div>
+              <div>
+                <p class="eyebrow">Qualidade do diagnóstico</p>
+                <h2 id="diagnostic-title">Leitura da campanha</h2>
+                <p id="diagnostic-explanation" class="muted"></p>
+              </div>
+            </div>
+            <div id="diagnostic-pillars" class="pillar-grid"></div>
+          </section>
+
+          <section id="plan" class="panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Ordem de execução</p>
+                <h2>Seu plano de agora</h2>
+                <p class="section-description">
+                  Três movimentos práticos, em ordem, com motivo e sinal de conclusão.
+                </p>
+              </div>
+              <span id="action-count" class="count-badge">0</span>
+            </div>
+            <div id="action-plan" class="action-grid"></div>
           </section>
 
           <div class="content-grid">
             <section id="counsel" class="panel counsel-panel">
               <div class="section-heading">
                 <div>
-                  <p class="eyebrow">Decisões explicáveis</p>
-                  <h2>Conselho do Alquimista</h2>
+                  <p class="eyebrow">Leitura explicável</p>
+                  <h2>Conselhos e alertas</h2>
                 </div>
                 <span id="recommendation-count" class="count-badge">0</span>
               </div>
               <div id="recommendations" class="recommendation-list"></div>
             </section>
 
-            <section class="panel operations-panel">
+            <section id="data-coverage" class="panel">
               <div class="section-heading">
                 <div>
-                  <p class="eyebrow">Estado atual</p>
-                  <h2>Radar operacional</h2>
+                  <p class="eyebrow">Limites da leitura</p>
+                  <h2>O que sabemos</h2>
                 </div>
+                <span id="coverage-badge" class="count-badge">—</span>
               </div>
-              <div id="category-bars" class="category-bars"></div>
+              <p class="section-description">
+                O Alquimista separa fatos observados de informações ausentes.
+              </p>
+              <div id="availability-list" class="availability-list"></div>
             </section>
           </div>
+
+          <section id="operation" class="panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Capacidade instalada</p>
+                <h2>Operação por função</h2>
+                <p class="section-description">
+                  Máquinas produtivas, armazenamento e itens de apoio aparecem separados.
+                </p>
+              </div>
+            </div>
+            <div id="operation-summary" class="operation-summary"></div>
+            <div id="category-bars" class="category-bars"></div>
+          </section>
 
           <section id="laboratories" class="panel">
             <div class="section-heading">
               <div>
                 <p class="eyebrow">Propriedades possuídas</p>
-                <h2>Laboratórios</h2>
+                <h2>Mapa dos laboratórios</h2>
+                <p class="section-description">
+                  “Objetos” significa tudo instalado; a linha funcional explica o que realmente produz.
+                </p>
               </div>
               <span id="property-count" class="count-badge">0</span>
             </div>
             <div id="property-grid" class="property-grid"></div>
+          </section>
+
+          <section id="portfolio" class="panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Produtos e receitas</p>
+                <h2>Grimório comercial</h2>
+                <p class="section-description">
+                  Visão do que foi descoberto e do estoque com preço de referência conhecido.
+                </p>
+              </div>
+            </div>
+            <div id="portfolio-summary" class="portfolio-summary"></div>
+            <div id="product-list" class="product-list"></div>
+          </section>
+
+          <section id="workforce" class="panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Delegação</p>
+                <h2>Equipe e cobertura</h2>
+                <p class="section-description">
+                  Mostra funções e bases com equipe; não inventa produtividade por funcionário.
+                </p>
+              </div>
+            </div>
+            <div id="workforce-content" class="workforce-grid"></div>
+          </section>
+
+          <section id="comparison" class="panel comparison-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Transmutação temporal</p>
+                <h2>O que mudou entre dois exports?</h2>
+                <p class="section-description">
+                  Compare sinais financeiros e operacionais sem unir campanhas automaticamente.
+                </p>
+              </div>
+            </div>
+            <div id="comparison-controls" class="comparison-controls">
+              <label>
+                <span>Usar como momento anterior</span>
+                <select id="baseline-select"></select>
+              </label>
+              <button id="compare-button" class="secondary-button" type="button">
+                Comparar momentos
+              </button>
+            </div>
+            <div id="comparison-empty" class="inline-empty">
+              Selecione um export relacionado para reconstruir a evolução da sessão.
+            </div>
+            <div id="comparison-result" class="comparison-result hidden"></div>
           </section>
 
           <section id="chronicles" class="panel">
@@ -171,6 +284,14 @@
         </div>
       </main>
     </div>
+
+    <dialog id="help-dialog" class="help-dialog">
+      <button id="help-close" class="dialog-close" type="button" aria-label="Fechar">×</button>
+      <p class="eyebrow">Glossário da Câmara</p>
+      <h2 id="help-title">Entenda este indicador</h2>
+      <p id="help-body"></p>
+      <div id="help-details" class="help-details"></div>
+    </dialog>
 
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
     <script src="/app.js"></script>

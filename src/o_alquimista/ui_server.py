@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from .advisor import build_dashboard
+from .advisor import build_advisor_comparison, build_dashboard
 from .database import AlquimistaDatabase
 from .errors import AdvisorUiError, AlquimistaError
 from .identity import resolve_campaign_identity
@@ -134,6 +134,33 @@ class AdvisorRequestHandler(BaseHTTPRequestHandler):
                 payload = build_dashboard(
                     AlquimistaDatabase(self.database_path),
                     campaign_id=campaign_id,
+                )
+            except (AlquimistaError, sqlite3.Error, ValueError) as exc:
+                self._send_json(
+                    {"error": str(exc)},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            self._send_json(payload)
+            return
+        if target.path == "/api/comparison":
+            query = parse_qs(target.query)
+            current_campaign_id = query.get("current_campaign_id", [None])[0]
+            baseline_campaign_id = query.get(
+                "baseline_campaign_id",
+                [None],
+            )[0]
+            if not current_campaign_id or not baseline_campaign_id:
+                self._send_json(
+                    {"error": "Selecione os dois momentos para comparar."},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            try:
+                payload = build_advisor_comparison(
+                    AlquimistaDatabase(self.database_path),
+                    current_campaign_id=current_campaign_id,
+                    baseline_campaign_id=baseline_campaign_id,
                 )
             except (AlquimistaError, sqlite3.Error, ValueError) as exc:
                 self._send_json(

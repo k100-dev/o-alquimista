@@ -17,7 +17,7 @@ from o_alquimista.ui_server import (
     serve_ui,
 )
 
-from tests.test_milestone3 import _create_zip
+from tests.test_milestone3 import _create_zip, _save_files
 
 
 def _multipart(filename: str, payload: bytes) -> tuple[str, bytes]:
@@ -84,10 +84,95 @@ class AdvisorProjectionTests(unittest.TestCase):
             dashboard = payload["dashboard"]
             self.assertEqual(dashboard["status"], "ready")
             self.assertEqual(dashboard["operations"]["equipment_count"], 4)
+            self.assertEqual(dashboard["operations"]["productive_count"], 3)
+            self.assertEqual(dashboard["operations"]["storage_count"], 1)
             self.assertEqual(dashboard["operations"]["active_count"], 2)
             self.assertEqual(dashboard["operations"]["unknown_state_count"], 2)
             self.assertEqual(dashboard["properties"][0]["name"], "laboratory")
+            self.assertIn("diagnostic", dashboard)
+            self.assertTrue(dashboard["action_plan"])
+            self.assertIn("portfolio", dashboard)
+            self.assertIn("workforce", dashboard)
+            self.assertIn("availability", dashboard)
             serialized = json.dumps(dashboard, ensure_ascii=False)
+            self.assertNotIn("unknown_fields", serialized)
+            self.assertNotIn('"raw"', serialized)
+            self.assertNotIn("synthetic-storage-guid", serialized)
+
+    def test_comparison_endpoint_projects_safe_exploratory_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database_path = root / "advisor.sqlite3"
+            first = root / "first.zip"
+            second = root / "second.zip"
+            _create_zip(first)
+            files = _save_files()
+            files["Money.json"]["Networth"] = 260
+            files["Time.json"]["ElapsedDays"] = 2
+            _create_zip(second, files)
+            server = ThreadingHTTPServer(
+                ("127.0.0.1", 0),
+                handler_factory(database_path),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            campaign_ids: list[str] = []
+            try:
+                for archive in (first, second):
+                    content_type, body = _multipart(
+                        archive.name,
+                        archive.read_bytes(),
+                    )
+                    connection = http.client.HTTPConnection(
+                        "127.0.0.1",
+                        server.server_port,
+                        timeout=10,
+                    )
+                    connection.request(
+                        "POST",
+                        "/api/import",
+                        body=body,
+                        headers={
+                            "Content-Type": content_type,
+                            "Content-Length": str(len(body)),
+                        },
+                    )
+                    response = connection.getresponse()
+                    payload = json.loads(response.read().decode("utf-8"))
+                    connection.close()
+                    self.assertEqual(response.status, 200)
+                    campaign_ids.append(payload["import"]["campaign_id"])
+                query = (
+                    "/api/comparison?"
+                    f"current_campaign_id={campaign_ids[1]}&"
+                    f"baseline_campaign_id={campaign_ids[0]}"
+                )
+                connection = http.client.HTTPConnection(
+                    "127.0.0.1",
+                    server.server_port,
+                    timeout=10,
+                )
+                connection.request("GET", query)
+                response = connection.getresponse()
+                comparison = json.loads(response.read().decode("utf-8"))
+                connection.close()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+            self.assertEqual(response.status, 200)
+            networth = next(
+                item
+                for item in comparison["financial_changes"]
+                if item["field"] == "networth"
+            )
+            self.assertEqual(networth["absolute_change"], "60.00")
+            self.assertIn(
+                comparison["relation"],
+                {"same_campaign", "candidate", "independent"},
+            )
+            serialized = json.dumps(comparison, ensure_ascii=False)
             self.assertNotIn("unknown_fields", serialized)
             self.assertNotIn('"raw"', serialized)
             self.assertNotIn("synthetic-storage-guid", serialized)

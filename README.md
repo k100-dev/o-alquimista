@@ -20,6 +20,10 @@ experiência consultiva local: a **Câmara do Alquimista**. Consulte
 [docs/ADVISOR_UI.md](docs/ADVISOR_UI.md).
 
 A interface usa somente o computador local e não realiza chamadas externas.
+Ela separa máquinas produtivas, armazenamento e itens de apoio; explica os
+indicadores; cria um plano de ação com critérios de sucesso; resume equipe e
+portfólio; e permite comparar exports relacionados de forma exploratória.
+Consulte também [o método consultivo](docs/ADVISOR_METHOD.md).
 
 ## Segurança read-only
 

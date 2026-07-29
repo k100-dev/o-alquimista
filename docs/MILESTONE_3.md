@@ -66,6 +66,18 @@ sintéticas e sanitizadas.
 - destacar o conselho prioritário, finanças, instalações, ocupação e histórico;
 - manter a arquitetura preparada para empacotamento posterior como `.exe`.
 
+### 3.6 — Experiência consultiva
+
+- substituir números ambíguos por linguagem orientada à decisão;
+- separar base produtiva, armazenamento, apoio e itens não classificados;
+- explicar que o snapshot é uma fotografia, não telemetria em tempo real;
+- oferecer diagnóstico da qualidade dos dados, sem pontuar o jogador;
+- gerar plano priorizado com ação, motivo, impacto e critério de sucesso;
+- apresentar funções da equipe e cobertura das bases;
+- apresentar portfólio com aviso explícito sobre preço de referência;
+- comparar exports candidatos sem consolidá-los automaticamente;
+- incluir glossário e revelação progressiva de limitações.
+
 ## Não objetivos
 
 - não calcular lucro por hora sem janela temporal suficiente;
