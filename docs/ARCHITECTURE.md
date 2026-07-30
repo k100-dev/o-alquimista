@@ -41,6 +41,8 @@ ZIP read-only
 - `evidence.py`: fábricas determinísticas das quatro categorias;
 - `analysis.py`: comparação, ordenação, marcos e regras de recomendação;
 - `database.py`: schema v3, migração v1/v2, deduplicação e consultas;
+- `advisor.py`: projeção pública, memória confirmada e orientação consultiva;
+- `ui_server.py`: API HTTP exclusivamente local e importação pela Câmara;
 - `memory_reports.py`: Markdown com seções epistemológicas separadas;
 - `cli.py`: adaptação de argumentos e apresentação;
 - `schedule_intelligence`: delegação de compatibilidade, sem lógica duplicada.
@@ -70,6 +72,28 @@ Listas oriundas do filesystem e artefatos analíticos possuem ordenação
 explícita. JSON usa chaves ordenadas. A data de importação fica no banco e só é
 metadado operacional; nunca participa da ordenação analítica. Empates após os
 sinais internos são resolvidos por `snapshot_id` estável.
+
+Associações candidatas permanecem relações entre campanhas independentes. O
+estado `explicitly_linked` registra somente a confirmação humana de
+continuidade. A operação é reversível e transacional; nenhum snapshot,
+evidência ou marco troca de campanha. A camada consultiva pode contar esses
+capítulos como uma memória confirmada, enquanto a camada analítica preserva a
+proveniência original.
+
+## Fontes de dados
+
+O motor deve receber dados por uma fronteira explícita de fonte:
+
+```text
+Export Save -> ImportPipeline -> modelo canônico -> memória -> análise -> mentor
+```
+
+**Export Save** é o modo primário atual. Um futuro **Folder Watch** deve apenas
+observar uma pasta escolhida pelo usuário e importar novos ZIPs completos pelo
+mesmo pipeline. Integrações em tempo real ficam indisponíveis enquanto não
+houver uma fonte oficial, estável e documentada. Ler memória do processo,
+instrumentar o executável ou escrever na pasta do jogo não faz parte da
+arquitetura.
 
 ## Comparação
 

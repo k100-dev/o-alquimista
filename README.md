@@ -29,7 +29,14 @@ de Conselho permite conversar localmente com um mentor determinístico sobre
 caixa, expansão, gargalos, equipe e estoque. Depois de um novo export, a
 Câmara compara os dois momentos, registra o retorno e relaciona o resultado à
 missão ativa.
+Quando o jogo não oferece um identificador forte, a seção **Memória da
+campanha** mostra capítulos sugeridos em linguagem humana. O jogador pode
+confirmar ou desfazer a relação localmente. A confirmação é reversível, não
+funde campanhas no banco e não altera qualquer export; ela apenas autoriza o
+mentor a usar aquele antes e depois como uma jornada confirmada.
 Consulte também [o método consultivo](docs/ADVISOR_METHOD.md).
+As decisões de produto e o roadmap orientado a valor estão em
+[docs/PRODUCT_AUDIT.md](docs/PRODUCT_AUDIT.md).
 
 ## Segurança read-only
 

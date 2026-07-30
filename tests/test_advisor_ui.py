@@ -8,7 +8,11 @@ import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from o_alquimista.advisor import answer_mentor_question, build_dashboard
+from o_alquimista.advisor import (
+    answer_mentor_question,
+    build_advisor_comparison,
+    build_dashboard,
+)
 from o_alquimista.database import AlquimistaDatabase
 from o_alquimista.errors import AdvisorUiError
 from o_alquimista.ui_server import (
@@ -113,11 +117,18 @@ class AdvisorProjectionTests(unittest.TestCase):
             database_path = root / "advisor.sqlite3"
             first = root / "first.zip"
             second = root / "second.zip"
-            _create_zip(first)
-            files = _save_files()
-            files["Money.json"]["Networth"] = 260
-            files["Time.json"]["ElapsedDays"] = 2
-            _create_zip(second, files)
+            first_files = _save_files()
+            first_files["Game.json"] = {
+                "OrganisationName": "Synthetic Organisation"
+            }
+            _create_zip(first, first_files)
+            second_files = _save_files()
+            second_files["Game.json"] = {
+                "OrganisationName": "Synthetic Organisation"
+            }
+            second_files["Money.json"]["Networth"] = 260
+            second_files["Time.json"]["ElapsedDays"] = 2
+            _create_zip(second, second_files)
             server = ThreadingHTTPServer(
                 ("127.0.0.1", 0),
                 handler_factory(database_path),
@@ -188,6 +199,172 @@ class AdvisorProjectionTests(unittest.TestCase):
             self.assertNotIn("unknown_fields", serialized)
             self.assertNotIn('"raw"', serialized)
             self.assertNotIn("synthetic-storage-guid", serialized)
+
+    def test_candidate_exports_can_be_confirmed_and_reverted_without_merging(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database_path = root / "advisor.sqlite3"
+            first = root / "first.zip"
+            second = root / "second.zip"
+            first_files = _save_files()
+            first_files["Game.json"] = {
+                "OrganisationName": "Synthetic Organisation"
+            }
+            _create_zip(first, first_files)
+            second_files = _save_files()
+            second_files["Game.json"] = {
+                "OrganisationName": "Synthetic Organisation"
+            }
+            second_files["Money.json"]["Networth"] = 260
+            second_files["Time.json"]["ElapsedDays"] = 2
+            _create_zip(second, second_files)
+            server = ThreadingHTTPServer(
+                ("127.0.0.1", 0),
+                handler_factory(database_path),
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            campaign_ids: list[str] = []
+            try:
+                for archive in (first, second):
+                    content_type, body = _multipart(
+                        archive.name,
+                        archive.read_bytes(),
+                    )
+                    connection = http.client.HTTPConnection(
+                        "127.0.0.1",
+                        server.server_port,
+                        timeout=10,
+                    )
+                    connection.request(
+                        "POST",
+                        "/api/import",
+                        body=body,
+                        headers={
+                            "Content-Type": content_type,
+                            "Content-Length": str(len(body)),
+                        },
+                    )
+                    response = connection.getresponse()
+                    payload = json.loads(response.read().decode("utf-8"))
+                    connection.close()
+                    self.assertEqual(response.status, 200)
+                    campaign_ids.append(payload["import"]["campaign_id"])
+
+                request_body = json.dumps(
+                    {
+                        "campaign_id": campaign_ids[1],
+                        "related_campaign_id": campaign_ids[0],
+                        "action": "confirm",
+                    }
+                ).encode("utf-8")
+                connection = http.client.HTTPConnection(
+                    "127.0.0.1",
+                    server.server_port,
+                    timeout=10,
+                )
+                connection.request(
+                    "POST",
+                    "/api/campaign-association",
+                    body=request_body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Content-Length": str(len(request_body)),
+                    },
+                )
+                response = connection.getresponse()
+                confirmed = json.loads(response.read().decode("utf-8"))
+                connection.close()
+
+                self.assertEqual(response.status, 200)
+                self.assertEqual(
+                    confirmed["association"]["association_state"],
+                    "explicitly_linked",
+                )
+                self.assertEqual(
+                    confirmed["dashboard"]["continuity"]["status"],
+                    "confirmed",
+                )
+                self.assertEqual(
+                    confirmed["dashboard"]["continuity"]["moment_count"],
+                    2,
+                )
+                self.assertEqual(
+                    confirmed["dashboard"]["continuity"]["review"]["relation"],
+                    "confirmed_continuity",
+                )
+
+                database = AlquimistaDatabase(database_path)
+                comparison = build_advisor_comparison(
+                    database,
+                    current_campaign_id=campaign_ids[1],
+                    baseline_campaign_id=campaign_ids[0],
+                )
+                self.assertEqual(
+                    comparison["relation"],
+                    "confirmed_continuity",
+                )
+                self.assertEqual(len(database.campaign_list()), 2)
+                mentor = answer_mentor_question(
+                    database,
+                    campaign_id=campaign_ids[1],
+                    question="O que mudou desde o export anterior?",
+                )
+                self.assertEqual(mentor["topic"], "memory")
+                self.assertEqual(
+                    mentor["title"],
+                    confirmed["dashboard"]["continuity"]["review"]["verdict"][
+                        "title"
+                    ],
+                )
+                self.assertTrue(
+                    any(
+                        str(item["label"]).startswith("Mudança")
+                        for item in mentor["evidence"]
+                    )
+                )
+
+                request_body = json.dumps(
+                    {
+                        "campaign_id": campaign_ids[1],
+                        "related_campaign_id": campaign_ids[0],
+                        "action": "revert",
+                    }
+                ).encode("utf-8")
+                connection = http.client.HTTPConnection(
+                    "127.0.0.1",
+                    server.server_port,
+                    timeout=10,
+                )
+                connection.request(
+                    "POST",
+                    "/api/campaign-association",
+                    body=request_body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Content-Length": str(len(request_body)),
+                    },
+                )
+                response = connection.getresponse()
+                reverted = json.loads(response.read().decode("utf-8"))
+                connection.close()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+            self.assertEqual(response.status, 200)
+            self.assertEqual(
+                reverted["association"]["association_state"],
+                "candidate",
+            )
+            self.assertEqual(
+                reverted["dashboard"]["continuity"]["status"],
+                "suggested",
+            )
+            serialized = json.dumps(confirmed, ensure_ascii=False)
+            self.assertNotIn("unknown_fields", serialized)
+            self.assertNotIn('"raw"', serialized)
 
     def test_mentor_answers_are_grounded_and_available_through_local_api(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -277,6 +454,7 @@ class AdvisorProjectionTests(unittest.TestCase):
         )
         html = (UI_ROOT / "index.html").read_text(encoding="utf-8")
         self.assertIn('id="mentor"', html)
+        self.assertIn('id="continuity"', html)
         self.assertIn('id="session-review"', html)
 
         with tempfile.TemporaryDirectory() as temporary:

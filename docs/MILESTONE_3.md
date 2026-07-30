@@ -101,6 +101,16 @@ sintéticas e sanitizadas.
 - apresentar um julgamento conservador da missão, sem atribuir causalidade;
 - levar o resultado de volta à conversa para iniciar o próximo ciclo.
 
+### 3.9 — Linha do tempo confirmada
+
+- apresentar campanhas candidatas como capítulos por dia e horário, sem hashes;
+- permitir confirmação humana explícita de continuidade;
+- permitir reversão sem perda de dados;
+- manter snapshots, evidências e campanhas analíticas separados;
+- usar a memória confirmada no mentor, nas missões e no retorno da sessão;
+- mostrar imediatamente uma revisão antes/depois quando houver dois momentos;
+- explicar que a confirmação não é evidência nativa nem prova de causalidade.
+
 ## Não objetivos
 
 - não calcular lucro por hora sem janela temporal suficiente;

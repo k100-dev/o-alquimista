@@ -2191,6 +2191,174 @@ body.details-open .details-gate {
   font-size: 8px;
 }
 
+.continuity-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.75fr);
+  gap: 28px;
+  padding: 28px;
+  border: 1px solid rgba(118, 230, 161, 0.2);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 8% 0, rgba(118, 230, 161, 0.12), transparent 27rem),
+    linear-gradient(145deg, rgba(15, 27, 19, 0.98), rgba(8, 13, 10, 0.98));
+  box-shadow: 0 26px 65px rgba(0, 0, 0, 0.2);
+}
+
+.continuity-heading {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.continuity-heading h2 {
+  max-width: 680px;
+  margin: 2px 0 8px;
+  font-family: Georgia, serif;
+  font-size: clamp(25px, 3vw, 38px);
+  font-weight: 500;
+  line-height: 1.08;
+}
+
+.continuity-copy > p {
+  max-width: 720px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.continuity-status {
+  flex: 0 0 auto;
+  padding: 8px 11px;
+  border: 1px solid rgba(229, 189, 101, 0.2);
+  border-radius: 999px;
+  color: var(--gold);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.continuity-status[data-status="confirmed"] {
+  border-color: rgba(118, 230, 161, 0.34);
+  background: rgba(118, 230, 161, 0.08);
+  color: var(--green);
+}
+
+.continuity-controls {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  background: rgba(3, 8, 5, 0.42);
+}
+
+.continuity-controls label {
+  display: grid;
+  gap: 7px;
+}
+
+.continuity-controls label > span {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.continuity-controls select {
+  width: 100%;
+  min-height: 43px;
+  padding: 0 12px;
+  border: 1px solid rgba(118, 230, 161, 0.17);
+  border-radius: 11px;
+  background: #0b110d;
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+}
+
+.continuity-controls .primary-button,
+.continuity-controls .secondary-button {
+  width: 100%;
+}
+
+.continuity-controls small {
+  color: #748074;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.continuity-review {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid rgba(229, 189, 101, 0.16);
+  border-radius: 14px;
+  background: rgba(229, 189, 101, 0.045);
+}
+
+.continuity-review > span {
+  color: var(--gold);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.continuity-review > strong {
+  display: block;
+  margin-top: 7px;
+  font-size: 14px;
+}
+
+.continuity-review > p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.continuity-review-deltas {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.continuity-delta {
+  padding: 10px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 11px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.continuity-delta span,
+.continuity-delta strong {
+  display: block;
+}
+
+.continuity-delta span {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.continuity-delta strong {
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 3px;
+}
+
 .quest-return-button {
   grid-column: 1 / -1;
   justify-self: start;
@@ -2507,6 +2675,10 @@ body.details-open .details-gate {
     grid-template-columns: 1fr;
   }
 
+  .continuity-panel {
+    grid-template-columns: 1fr;
+  }
+
   .mentor-evidence,
   .review-deltas {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2590,6 +2762,7 @@ body.details-open .details-gate {
   }
 
   #import-button {
+    gap: 5px;
     font-size: 0;
   }
 
@@ -2599,6 +2772,15 @@ body.details-open .details-gate {
 
   #import-button-label {
     display: none;
+  }
+
+  #import-button::after {
+    color: currentColor;
+    content: "Export";
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
   }
 
   .advisor-hero {
@@ -2716,6 +2898,20 @@ body.details-open .details-gate {
 
   .campaign-loop {
     padding: 20px;
+  }
+
+  .continuity-panel {
+    gap: 18px;
+    padding: 20px;
+  }
+
+  .continuity-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .continuity-review-deltas {
+    grid-template-columns: 1fr;
   }
 
   .loop-steps {

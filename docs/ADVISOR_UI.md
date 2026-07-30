@@ -35,8 +35,10 @@ Use `--no-browser` quando quiser iniciar apenas o servidor.
 6. A cópia temporária é removida.
 7. A interface recebe apenas uma projeção curada para apresentação.
 8. O jogador pode consultar o mentor local sobre a decisão atual.
-9. Uma missão ativa define o experimento da próxima sessão.
-10. No novo export, a Câmara compara os momentos e apresenta o retorno da
+9. Quando a identidade é apenas candidata, o jogador pode confirmar que dois
+   capítulos pertencem à mesma jornada, sem fundi-los.
+10. Uma missão ativa define o experimento da próxima sessão.
+11. No novo export, a Câmara compara os momentos e apresenta o retorno da
     sessão antes do próximo conselho.
 
 Nenhuma chamada de rede externa é necessária. O servidor rejeita endereços de
@@ -56,8 +58,14 @@ As rotas locais são:
 - `GET /api/dashboard`;
 - `GET /api/dashboard?campaign_id=...`;
 - `GET /api/comparison?current_campaign_id=...&baseline_campaign_id=...`;
+- `POST /api/campaign-association`;
 - `POST /api/mentor`;
 - `POST /api/import`.
+
+`POST /api/campaign-association` aceita somente `confirm` ou `revert`. A
+operação atualiza o estado da associação candidata em uma transação local. Ela
+não move snapshots, não funde campanhas, não apaga evidências e não escreve no
+save.
 
 ## Linguagem da interface
 
@@ -98,6 +106,9 @@ save. Um equipamento reconhecido sem estado não é presumido ocioso.
   produtividade individual.
 - **Transmutação temporal** compara exports relacionados de forma exploratória
   sem consolidar campanhas candidatas.
+- **Memória da campanha** troca identificadores técnicos por dia e horário do
+  jogo, permite confirmar capítulos sugeridos e libera uma leitura real de
+  antes e depois para o mentor.
 - **O que sabemos** torna explícita a diferença entre observado e ausente.
 
 O modo inicial revela apenas narrativa, recursos essenciais e missões. O painel
@@ -116,6 +127,11 @@ recebe outro identificador. Esse estado:
 - não é enviado ao servidor;
 - não transforma uma marcação manual em evidência analítica;
 - serve apenas para orientar a sessão do jogador.
+
+A confirmação de continuidade fica no SQLite porque deve sobreviver à próxima
+abertura da Câmara. Ela continua sendo uma declaração explícita do jogador,
+não um fato extraído do save. O estado pode ser revertido na própria interface
+e as campanhas continuam fisicamente separadas.
 
 O terceiro passo da missão só é concluído automaticamente depois da importação
 de outro export. A Câmara então utiliza os IDs exatos dos snapshots anterior e
@@ -148,7 +164,8 @@ sem texto, logotipo ou semelhança intencional com personagem existente.
 
 - a interface apresenta fatos e regras locais já sustentadas pelo motor;
 - lucro por hora, ROI e capacidade não são exibidos sem dados suficientes;
-- campanhas candidatas continuam separadas;
+- campanhas candidatas continuam separadas, mesmo quando o jogador confirma a
+  continuidade entre capítulos;
 - comparações candidatas mostram correlação, não causalidade;
 - progresso manual de missão não substitui validação por novo snapshot;
 - a conversa compreende um conjunto explícito de intenções e não substitui um

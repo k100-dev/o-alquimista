@@ -117,6 +117,24 @@ A Transmutação Temporal permite contraste entre exports candidatos. Ela:
 - não atribui causalidade;
 - não expõe identificadores internos, `raw` ou campos desconhecidos.
 
+## Memória confirmada
+
+Quando o save não contém um identificador forte, o sistema preserva campanhas
+candidatas separadas. A interface pode mostrar uma sugestão de continuidade
+baseada nos sinais já calculados e pedir uma decisão humana:
+
+1. **sugerido** — o sistema encontrou sinais em comum, mas não trata os
+   capítulos como uma jornada;
+2. **confirmado** — o jogador declarou que os capítulos pertencem à mesma
+   jornada;
+3. **revertido** — a declaração foi desfeita e a relação volta a ser apenas
+   sugestão.
+
+A confirmação não muda fatos observados, não aumenta a confiança da identidade
+nativa do save e não prova causalidade. Ela permite apenas que a camada
+consultiva conte os momentos juntos, ofereça uma revisão antes/depois e use
+essa memória na conversa e nas missões.
+
 ## Próximas extensões
 
 Para estimar lucro por hora, gargalo de throughput e ROI será necessária uma

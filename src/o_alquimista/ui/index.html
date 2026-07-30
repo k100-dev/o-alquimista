@@ -180,6 +180,52 @@
             </div>
           </section>
 
+          <section
+            id="continuity"
+            class="continuity-panel"
+            aria-label="Linha do tempo confirmada"
+            aria-live="polite"
+          >
+            <div class="continuity-copy">
+              <div class="continuity-heading">
+                <div>
+                  <p class="eyebrow">Memória assistida</p>
+                  <h2 id="continuity-title">Conecte os capítulos da sua campanha</h2>
+                </div>
+                <span id="continuity-status" class="continuity-status">a confirmar</span>
+              </div>
+              <p id="continuity-body">
+                O Alquimista procura exports relacionados, mas só você confirma
+                quando dois momentos pertencem à mesma jornada.
+              </p>
+              <div id="continuity-review" class="continuity-review hidden">
+                <span>Leitura entre os momentos confirmados</span>
+                <strong id="continuity-review-title">—</strong>
+                <p id="continuity-review-body"></p>
+                <div id="continuity-review-deltas" class="continuity-review-deltas"></div>
+              </div>
+            </div>
+            <div class="continuity-controls">
+              <label>
+                <span>Capítulo relacionado</span>
+                <select id="continuity-select" aria-label="Selecionar capítulo relacionado"></select>
+              </label>
+              <button id="continuity-confirm-button" class="primary-button" type="button">
+                Sim, é a mesma campanha
+              </button>
+              <button id="continuity-compare-button" class="secondary-button" type="button">
+                Comparar antes
+              </button>
+              <button id="continuity-revert-button" class="text-button hidden" type="button">
+                Desfazer confirmação
+              </button>
+              <small>
+                A confirmação é local e reversível. Os ZIPs e snapshots nunca
+                são fundidos, editados ou apagados.
+              </small>
+            </div>
+          </section>
+
           <section class="journey-strip" aria-label="Jornada da campanha">
             <div class="journey-heading">
               <div>

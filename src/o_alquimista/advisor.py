@@ -290,6 +290,11 @@ def _campaign_summary(campaign: dict[str, Any]) -> dict[str, Any]:
         "candidate_association_count": campaign.get(
             "candidate_association_count"
         ),
+        "confirmed_association_count": campaign.get(
+            "confirmed_association_count"
+        ),
+        "latest_elapsed_days": campaign.get("latest_elapsed_days"),
+        "latest_time_of_day": campaign.get("latest_time_of_day"),
     }
 
 
@@ -776,18 +781,112 @@ def _related_exports(
                 "moment": _game_moment(snapshot),
                 "networth": _decimal_text(finance.get("networth")),
                 "shared_signal_count": len(shared_signals or ()),
-                "relation": "candidate",
+                "relation": (
+                    "confirmed"
+                    if association.get("association_state")
+                    == "explicitly_linked"
+                    else "candidate"
+                ),
             }
         )
     return sorted(
         related,
         key=lambda item: (
+            item["relation"] == "confirmed",
             item["moment"].get("elapsed_days") or -1,
             item["moment"].get("time_of_day") or -1,
             str(item["campaign_id"]),
         ),
         reverse=True,
     )
+
+
+def _continuity_summary(
+    database: AlquimistaDatabase,
+    *,
+    campaign_id: str,
+    current_moment: dict[str, Any],
+    related_exports: list[dict[str, Any]],
+) -> dict[str, Any]:
+    confirmed = [
+        item for item in related_exports if item.get("relation") == "confirmed"
+    ]
+    suggested = [
+        item for item in related_exports if item.get("relation") == "candidate"
+    ]
+    selected = confirmed[0] if confirmed else suggested[0] if suggested else None
+    review = None
+    if confirmed:
+        current_day = current_moment.get("elapsed_days")
+        current_time = current_moment.get("time_of_day")
+
+        def moment_key(item: dict[str, Any]) -> tuple[int, int]:
+            moment = item.get("moment") or {}
+            day = moment.get("elapsed_days")
+            time = moment.get("time_of_day")
+            return (
+                int(day) if isinstance(day, (int, float)) else -1,
+                int(time) if isinstance(time, (int, float)) else -1,
+            )
+
+        current_key = (
+            int(current_day) if isinstance(current_day, (int, float)) else -1,
+            int(current_time) if isinstance(current_time, (int, float)) else -1,
+        )
+        previous = [
+            item for item in confirmed if moment_key(item) <= current_key
+        ]
+        baseline = previous[0] if previous else confirmed[0]
+        comparison = build_advisor_comparison(
+            database,
+            current_campaign_id=campaign_id,
+            baseline_campaign_id=str(baseline["campaign_id"]),
+        )
+        review = {
+            "relation": comparison["relation"],
+            "baseline": comparison["baseline"],
+            "current": comparison["current"],
+            "verdict": comparison["verdict"],
+            "financial_changes": comparison["financial_changes"],
+            "operational_sections": comparison["operational_sections"],
+            "caution": comparison["caution"],
+        }
+
+    if confirmed:
+        status = "confirmed"
+        title = "Sua memória de campanha está conectada"
+        body = (
+            f"{len(confirmed) + 1} momentos fazem parte da jornada confirmada. "
+            "O mentor já pode usar o antes e depois sem tratar a relação como "
+            "uma suposição."
+        )
+    elif suggested:
+        status = "suggested"
+        title = "O Alquimista encontrou um possível capítulo anterior"
+        body = (
+            "Os exports compartilham sinais locais, mas só você pode confirmar "
+            "se pertencem à mesma campanha. Nada será fundido ou apagado."
+        )
+    else:
+        status = "isolated"
+        title = "Este ainda é um capítulo isolado"
+        body = (
+            "Importe outro export da mesma campanha para construir uma linha do "
+            "tempo e medir a evolução."
+        )
+    return {
+        "status": status,
+        "title": title,
+        "body": body,
+        "moment_count": len(confirmed) + 1,
+        "confirmed_count": len(confirmed),
+        "suggested_count": len(suggested),
+        "selected_related_campaign_id": (
+            selected.get("campaign_id") if selected else None
+        ),
+        "selected_relation": selected.get("relation") if selected else None,
+        "review": review,
+    }
 
 
 def _campaign_story(
@@ -1170,31 +1269,42 @@ def build_advisor_comparison(
                 ),
             }
         )
-    candidate_ids = {
-        str(item.get("candidate_campaign_id") or "")
+    association_states = {
+        str(item.get("candidate_campaign_id") or ""): str(
+            item.get("association_state") or "candidate"
+        )
         for item in database.campaign_associations(current_campaign_id)
     }
     relation = (
         "same_campaign"
         if current_campaign_id == baseline_campaign_id
+        else "confirmed_continuity"
+        if association_states.get(baseline_campaign_id) == "explicitly_linked"
         else "candidate"
-        if baseline_campaign_id in candidate_ids
+        if baseline_campaign_id in association_states
         else "independent"
     )
+    if relation == "confirmed_continuity":
+        caution = (
+            "Continuidade confirmada por você. Os exports permanecem separados "
+            "e read-only; a comparação mede mudança, não prova causalidade."
+        )
+    elif relation == "candidate":
+        caution = (
+            "Comparação exploratória: sinais locais relacionam os exports, mas "
+            "eles não são unidos automaticamente como a mesma campanha."
+        )
+    elif relation == "same_campaign":
+        caution = "Comparação entre snapshots confirmados da mesma campanha."
+    else:
+        caution = (
+            "Comparação exploratória entre campanhas sem relação confirmada. "
+            "Use apenas para contraste, não para avaliar evolução."
+        )
     return {
         "status": "ready",
         "relation": relation,
-        "caution": (
-            "Comparação exploratória: sinais locais relacionam os exports, mas eles "
-            "não são unidos automaticamente como a mesma campanha."
-            if relation == "candidate"
-            else "Comparação entre snapshots confirmados da mesma campanha."
-            if relation == "same_campaign"
-            else (
-                "Comparação exploratória entre campanhas sem relação confirmada. "
-                "Use apenas para contraste, não para avaliar evolução."
-            )
-        ),
+        "caution": caution,
         "baseline": {
             "campaign": campaigns[baseline_campaign_id],
             "moment": _game_moment(baseline),
@@ -1349,6 +1459,13 @@ def build_dashboard(
         selected_campaign_id,
         campaigns,
     )
+    current_moment = _game_moment(snapshot)
+    continuity = _continuity_summary(
+        database,
+        campaign_id=selected_campaign_id,
+        current_moment=current_moment,
+        related_exports=related_exports,
+    )
     campaign = next(
         (
             item
@@ -1374,7 +1491,13 @@ def build_dashboard(
         operations=operations,
         workforce=workforce,
         portfolio=portfolio,
-        campaign=campaign or {},
+        campaign={
+            **(campaign or {}),
+            "snapshot_count": max(
+                int((campaign or {}).get("snapshot_count") or 0),
+                int(continuity["moment_count"]),
+            ),
+        },
     )
     quests = _quest_board(action_plan)
     achievements = _achievements(
@@ -1393,7 +1516,7 @@ def build_dashboard(
             "game_version": (snapshot.get("metadata") or {}).get("game_version"),
             "elapsed_days": game.get("elapsed_days"),
             "time_of_day": game.get("time_of_day"),
-            "moment": _game_moment(snapshot),
+            "moment": current_moment,
             "kind": "snapshot",
             "explanation": (
                 "Esta tela é uma fotografia do último export, não uma leitura em tempo real."
@@ -1418,6 +1541,7 @@ def build_dashboard(
         "quests": quests,
         "achievements": achievements,
         "related_exports": related_exports,
+        "continuity": continuity,
         "network": {
             "npc_count": len(snapshot.get("npcs") or ()),
             "business_count": len(snapshot.get("businesses") or ()),
@@ -1478,7 +1602,7 @@ def answer_mentor_question(
     operations = dashboard["operations"]
     workforce = dashboard["workforce"]
     portfolio = dashboard["portfolio"]
-    campaign = dashboard.get("campaign") or {}
+    continuity = dashboard.get("continuity") or {}
     quests = dashboard.get("quests") or []
     first_quest = quests[0] if quests else None
     evidence: list[dict[str, Any]] = []
@@ -1741,21 +1865,40 @@ def answer_mentor_question(
         ]
     elif any(
         word in normalized
-        for word in ("export", "proximo save", "provar", "medir", "historico", "evolucao")
+        for word in (
+            "export",
+            "proximo save",
+            "provar",
+            "medir",
+            "historico",
+            "evolucao",
+            "mudou",
+            "mudanca",
+        )
     ):
         topic = "memory"
-        title = "O próximo export transforma conselho em aprendizado"
+        review = continuity.get("review") or {}
+        review_verdict = review.get("verdict") or {}
+        title = (
+            str(review_verdict.get("title"))
+            if review_verdict.get("title")
+            else "O próximo export transforma conselho em aprendizado"
+        )
         evidence.extend(
             [
                 {
-                    "label": "Momentos confirmados nesta campanha",
-                    "value": campaign.get("snapshot_count"),
+                    "label": "Momentos confirmados na jornada",
+                    "value": continuity.get("moment_count"),
                     "format": "number",
                 },
                 {
-                    "label": "Exports relacionados",
-                    "value": len(dashboard.get("related_exports") or []),
-                    "format": "number",
+                    "label": "Continuidade confirmada",
+                    "value": (
+                        "sim"
+                        if continuity.get("status") == "confirmed"
+                        else "a confirmar"
+                    ),
+                    "format": "text",
                 },
                 {
                     "label": "Missões disponíveis",
@@ -1764,17 +1907,49 @@ def answer_mentor_question(
                 },
             ]
         )
-        answer = (
-            "Antes de jogar, escolha uma missão e faça apenas a mudança principal. "
-            "Depois exporte novamente: eu compararei caixa, patrimônio e mudanças "
-            "operacionais para dizer se a hipótese ganhou ou perdeu força."
-        )
+        for item in review.get("financial_changes") or []:
+            if item.get("status") != "changed":
+                continue
+            evidence.append(
+                {
+                    "label": f"Mudança: {item.get('label') or 'financeiro'}",
+                    "value": item.get("absolute_change"),
+                    "format": "money",
+                }
+            )
+            if len(evidence) >= 5:
+                break
+        for item in review.get("operational_sections") or []:
+            changed_count = int(item.get("changed_count") or 0)
+            if changed_count <= 0:
+                continue
+            evidence.append(
+                {
+                    "label": f"Mudanças em {item.get('label') or 'operação'}",
+                    "value": changed_count,
+                    "format": "number",
+                }
+            )
+            break
+        if review:
+            answer = (
+                f"{review_verdict.get('body') or 'Os capítulos confirmados mudaram.'} "
+                "Use os deltas como sinais para decidir o próximo experimento; eles "
+                "mostram correlação entre os momentos, não a causa isolada."
+            )
+            confidence = "medium"
+        else:
+            answer = (
+                "Antes de jogar, escolha uma missão e faça apenas a mudança principal. "
+                "Depois exporte novamente: eu compararei caixa, patrimônio e mudanças "
+                "operacionais para dizer se a hipótese ganhou ou perdeu força."
+            )
+            confidence = "high"
         action = (
             first_quest["objective"]
             if first_quest
             else "Jogue uma sessão curta, salve e retorne com o novo ZIP."
         )
-        confidence = "high"
         follow_up = [
             "Qual missão devo assumir?",
             "O que mudou desde o export anterior?",

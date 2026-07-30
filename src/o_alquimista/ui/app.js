@@ -6,6 +6,10 @@ const ui = {
   dashboard: document.querySelector("#dashboard"),
   campaignSelect: document.querySelector("#campaign-select"),
   baselineSelect: document.querySelector("#baseline-select"),
+  continuitySelect: document.querySelector("#continuity-select"),
+  continuityConfirm: document.querySelector("#continuity-confirm-button"),
+  continuityCompare: document.querySelector("#continuity-compare-button"),
+  continuityRevert: document.querySelector("#continuity-revert-button"),
   archiveInput: document.querySelector("#archive-input"),
   importButton: document.querySelector("#import-button"),
   importButtonLabel: document.querySelector("#import-button-label"),
@@ -114,12 +118,6 @@ function element(tag, className, text) {
   return node;
 }
 
-function shortId(value) {
-  if (!value) return "export sem identificação forte";
-  const text = String(value);
-  return text.length > 18 ? `${text.slice(0, 10)}…${text.slice(-4)}` : text;
-}
-
 function money(value) {
   if (value === null || value === undefined || value === "") return "indisponível";
   const negative = String(value).startsWith("-");
@@ -139,6 +137,29 @@ function signedMoney(value) {
 function quantity(value, singular, plural) {
   if (value === null || value === undefined) return `— ${plural}`;
   return `${value} ${Number(value) === 1 ? singular : plural}`;
+}
+
+function timeLabel(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  const integer = Math.trunc(numeric);
+  const hours = Math.trunc(integer / 100);
+  const minutes = integer % 100;
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function campaignLabel(campaign) {
+  const day = campaign.latest_elapsed_days;
+  const time = timeLabel(campaign.latest_time_of_day);
+  const moment = day === null || day === undefined
+    ? "Momento importado"
+    : `Dia ${day}${time ? ` · ${time}` : ""}`;
+  const relation = Number(campaign.confirmed_association_count || 0) > 0
+    ? "memória confirmada"
+    : `identidade ${confidenceLabels[campaign.confidence] || "indisponível"}`;
+  return `${moment} · ${relation}`;
 }
 
 function showToast(message, isError = false) {
@@ -229,9 +250,7 @@ function renderCampaigns(data) {
   for (const campaign of data.campaigns || []) {
     const option = document.createElement("option");
     option.value = campaign.campaign_id;
-    option.textContent =
-      `${campaign.display_name || shortId(campaign.campaign_id)} · ` +
-      `${confidenceLabels[campaign.confidence] || campaign.confidence}`;
+    option.textContent = campaignLabel(campaign);
     option.selected = campaign.campaign_id === data.selected_campaign_id;
     ui.campaignSelect.appendChild(option);
   }
@@ -243,9 +262,10 @@ function renderCampaigns(data) {
     const option = document.createElement("option");
     option.value = item.campaign_id;
     const moment = item.moment || {};
+    const relation = item.relation === "confirmed" ? "confirmado" : "sugerido";
     option.textContent =
       `Dia ${moment.elapsed_days ?? "—"} ${moment.time_label || ""} · ` +
-      `${item.shared_signal_count} sinais em comum`;
+      `${relation} · ${item.shared_signal_count} sinais em comum`;
     ui.baselineSelect.appendChild(option);
   }
   ui.baselineSelect.disabled = related.length === 0;
@@ -253,6 +273,98 @@ function renderCampaigns(data) {
   document.querySelector("#comparison-empty").textContent = related.length
     ? `${related.length} export(s) relacionado(s) disponível(is) para comparação exploratória.`
     : "Importe outro momento da campanha para liberar a comparação.";
+}
+
+function continuitySelection(data = currentDashboard) {
+  if (!data || !ui.continuitySelect.value) return null;
+  return (data.related_exports || []).find(
+    (item) => item.campaign_id === ui.continuitySelect.value,
+  ) || null;
+}
+
+function renderContinuityReview(review) {
+  const container = document.querySelector("#continuity-review");
+  const deltas = document.querySelector("#continuity-review-deltas");
+  clear(deltas);
+  if (!review) {
+    container.classList.add("hidden");
+    return;
+  }
+  document.querySelector("#continuity-review-title").textContent =
+    review.verdict?.title || "Comparação disponível";
+  document.querySelector("#continuity-review-body").textContent =
+    review.verdict?.body || review.caution || "";
+  const financial = (review.financial_changes || [])
+    .filter((item) => item.status === "changed")
+    .slice(0, 2);
+  for (const item of financial) {
+    const card = element("article", "continuity-delta");
+    card.appendChild(element("span", "", item.label));
+    card.appendChild(element("strong", "", signedMoney(item.absolute_change)));
+    deltas.appendChild(card);
+  }
+  for (const item of (review.operational_sections || []).slice(0, 2)) {
+    const card = element("article", "continuity-delta");
+    card.appendChild(element("span", "", item.label));
+    card.appendChild(
+      element(
+        "strong",
+        "",
+        quantity(item.changed_count, "mudança", "mudanças"),
+      ),
+    );
+    deltas.appendChild(card);
+  }
+  container.classList.remove("hidden");
+}
+
+function updateContinuityControls(data = currentDashboard) {
+  const selected = continuitySelection(data);
+  const hasSelection = Boolean(selected);
+  const confirmed = selected?.relation === "confirmed";
+  ui.continuitySelect.disabled = !hasSelection;
+  ui.continuityCompare.disabled = !hasSelection;
+  ui.continuityConfirm.classList.toggle("hidden", !hasSelection || confirmed);
+  ui.continuityRevert.classList.toggle("hidden", !hasSelection || !confirmed);
+}
+
+function renderContinuity(data) {
+  const continuity = data.continuity || {};
+  const related = data.related_exports || [];
+  const status = continuity.status || "isolated";
+  document.querySelector("#continuity-title").textContent =
+    continuity.title || "Conecte os capítulos da sua campanha";
+  document.querySelector("#continuity-body").textContent =
+    continuity.body || "Importe outro momento para construir sua memória.";
+  const badge = document.querySelector("#continuity-status");
+  badge.textContent = {
+    confirmed: `${continuity.moment_count || 1} momentos conectados`,
+    suggested: `${continuity.suggested_count || related.length} sugestão(ões)`,
+    isolated: "aguardando outro export",
+  }[status] || status;
+  badge.dataset.status = status;
+
+  clear(ui.continuitySelect);
+  for (const item of related) {
+    const option = document.createElement("option");
+    option.value = item.campaign_id;
+    const moment = item.moment || {};
+    const relation = item.relation === "confirmed" ? "confirmado" : "sugerido";
+    option.textContent =
+      `Dia ${moment.elapsed_days ?? "—"}${moment.time_label ? ` · ${moment.time_label}` : ""}` +
+      ` · ${relation}`;
+    option.selected =
+      item.campaign_id === continuity.selected_related_campaign_id;
+    ui.continuitySelect.appendChild(option);
+  }
+  if (!related.length) {
+    const option = document.createElement("option");
+    option.textContent = "Nenhum capítulo relacionado encontrado";
+    option.value = "";
+    ui.continuitySelect.appendChild(option);
+  }
+  renderContinuityReview(continuity.review);
+  updateContinuityControls(data);
 }
 
 function renderMessage(data) {
@@ -1061,6 +1173,7 @@ function render(data) {
   renderMessage(data);
   renderStory(data);
   renderMentor(data);
+  renderContinuity(data);
   renderMetrics(data);
   renderDiagnostic(data);
   renderActionPlan(data);
@@ -1111,6 +1224,70 @@ async function compareCampaigns() {
   } finally {
     ui.compareButton.disabled = false;
     ui.compareButton.textContent = "Comparar momentos";
+  }
+}
+
+async function compareContinuity() {
+  const related = continuitySelection();
+  if (!currentDashboard || !related) return;
+  ui.continuityCompare.disabled = true;
+  ui.continuityCompare.textContent = "Comparando…";
+  const query = new URLSearchParams({
+    current_campaign_id: currentDashboard.selected_campaign_id,
+    baseline_campaign_id: related.campaign_id,
+  });
+  try {
+    const response = await fetch(`/api/comparison?${query}`);
+    const data = await response.json();
+    if (!response.ok || data.error) {
+      throw new Error(data.error || "Falha na comparação.");
+    }
+    renderContinuityReview(data);
+    showToast(
+      data.relation === "confirmed_continuity"
+        ? "Memória confirmada comparada."
+        : "Comparação exploratória pronta. Confirme somente se reconhecer a campanha.",
+    );
+  } catch (error) {
+    showToast(error.message || "Não foi possível comparar os capítulos.", true);
+  } finally {
+    ui.continuityCompare.textContent = "Comparar antes";
+    updateContinuityControls();
+  }
+}
+
+async function setCampaignAssociation(action) {
+  const related = continuitySelection();
+  if (!currentDashboard || !related) return;
+  ui.continuityConfirm.disabled = true;
+  ui.continuityRevert.disabled = true;
+  try {
+    const response = await fetch("/api/campaign-association", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaign_id: currentDashboard.selected_campaign_id,
+        related_campaign_id: related.campaign_id,
+        action,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok || data.error) {
+      throw new Error(data.error || "Falha ao atualizar a memória.");
+    }
+    render(data.dashboard);
+    showToast(
+      action === "confirm"
+        ? "Capítulos conectados. O mentor já pode usar este antes e depois."
+        : "Confirmação desfeita. Os capítulos voltaram ao modo sugerido.",
+    );
+    containerScrollIntoView("#continuity");
+  } catch (error) {
+    showToast(error.message || "Não foi possível atualizar a memória.", true);
+  } finally {
+    ui.continuityConfirm.disabled = false;
+    ui.continuityRevert.disabled = false;
+    updateContinuityControls();
   }
 }
 
@@ -1175,6 +1352,19 @@ for (const button of document.querySelectorAll(".help-button")) {
 ui.archiveInput.addEventListener("change", () => importArchive(ui.archiveInput.files[0]));
 ui.campaignSelect.addEventListener("change", () => loadDashboard(ui.campaignSelect.value));
 ui.compareButton.addEventListener("click", compareCampaigns);
+ui.continuitySelect.addEventListener("change", () => {
+  updateContinuityControls();
+  renderContinuityReview(null);
+});
+ui.continuityCompare.addEventListener("click", compareContinuity);
+ui.continuityConfirm.addEventListener(
+  "click",
+  () => setCampaignAssociation("confirm"),
+);
+ui.continuityRevert.addEventListener(
+  "click",
+  () => setCampaignAssociation("revert"),
+);
 ui.mentorForm.addEventListener("submit", (event) => {
   event.preventDefault();
   askMentor(ui.mentorInput.value);

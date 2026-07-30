@@ -203,7 +203,11 @@ class AdvisorRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - API de BaseHTTPRequestHandler
         target = urlsplit(self.path)
-        if target.path not in {"/api/import", "/api/mentor"}:
+        if target.path not in {
+            "/api/import",
+            "/api/mentor",
+            "/api/campaign-association",
+        }:
             self._send_json(
                 {"error": "Recurso não encontrado."},
                 status=HTTPStatus.NOT_FOUND,
@@ -214,6 +218,59 @@ class AdvisorRequestHandler(BaseHTTPRequestHandler):
                 {"error": "A interface aceita somente conexões locais."},
                 status=HTTPStatus.FORBIDDEN,
             )
+            return
+        if target.path == "/api/campaign-association":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = 0
+            if length <= 0 or length > 16 * 1024:
+                self._send_json(
+                    {"error": "A confirmação está vazia ou excede o limite."},
+                    status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                )
+                return
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+                if not isinstance(body, dict):
+                    raise ValueError("A confirmação da jornada é inválida.")
+                campaign_id = str(body.get("campaign_id") or "")
+                related_campaign_id = str(
+                    body.get("related_campaign_id") or ""
+                )
+                action = str(body.get("action") or "")
+                state = {
+                    "confirm": "explicitly_linked",
+                    "revert": "candidate",
+                }.get(action)
+                if state is None:
+                    raise ValueError("Escolha confirmar ou desfazer o vínculo.")
+                database = AlquimistaDatabase(self.database_path)
+                association = database.set_campaign_association_state(
+                    campaign_id,
+                    related_campaign_id,
+                    state=state,
+                )
+                payload = {
+                    "association": association,
+                    "dashboard": build_dashboard(
+                        database,
+                        campaign_id=campaign_id,
+                    ),
+                }
+            except (
+                AlquimistaError,
+                OSError,
+                sqlite3.Error,
+                UnicodeError,
+                ValueError,
+            ) as exc:
+                self._send_json(
+                    {"error": str(exc)},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            self._send_json(payload)
             return
         if target.path == "/api/mentor":
             try:

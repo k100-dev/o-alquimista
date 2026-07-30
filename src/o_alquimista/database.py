@@ -1168,7 +1168,30 @@ class AlquimistaDatabase:
                         FROM campaign_associations AS a
                         WHERE a.left_campaign_id = c.id
                            OR a.right_campaign_id = c.id
-                    ) AS candidate_association_count
+                    ) AS candidate_association_count,
+                    (
+                        SELECT COUNT(*)
+                        FROM campaign_associations AS a
+                        WHERE (
+                            a.left_campaign_id = c.id
+                            OR a.right_campaign_id = c.id
+                        )
+                        AND a.association_state = 'explicitly_linked'
+                    ) AS confirmed_association_count,
+                    (
+                        SELECT t.elapsed_days
+                        FROM timeline_entries AS t
+                        WHERE t.campaign_id = c.id
+                        ORDER BY t.chronological_order DESC, t.snapshot_id DESC
+                        LIMIT 1
+                    ) AS latest_elapsed_days,
+                    (
+                        SELECT t.time_of_day
+                        FROM timeline_entries AS t
+                        WHERE t.campaign_id = c.id
+                        ORDER BY t.chronological_order DESC, t.snapshot_id DESC
+                        LIMIT 1
+                    ) AS latest_time_of_day
                 FROM campaigns AS c
                 LEFT JOIN imports AS i ON i.campaign_id = c.id
                 LEFT JOIN snapshots AS s ON s.import_id = i.id
@@ -1211,6 +1234,74 @@ class AlquimistaDatabase:
             )
             associations.append(association)
         return associations
+
+    def set_campaign_association_state(
+        self,
+        campaign_id: str,
+        related_campaign_id: str,
+        *,
+        state: str,
+    ) -> dict[str, Any]:
+        """Confirma ou desfaz uma continuidade sem fundir os dados de origem."""
+
+        if state not in {"candidate", "explicitly_linked"}:
+            raise ValueError("Estado de continuidade inválido.")
+        if not campaign_id or not related_campaign_id:
+            raise ValueError("Selecione os dois exports para confirmar a jornada.")
+        if campaign_id == related_campaign_id:
+            raise ValueError("Selecione dois exports diferentes.")
+
+        self.initialize()
+        with self._connection(immediate=True) as connection:
+            campaigns = connection.execute(
+                """
+                SELECT id FROM campaigns
+                WHERE id IN (?, ?)
+                """,
+                (campaign_id, related_campaign_id),
+            ).fetchall()
+            if len(campaigns) != 2:
+                raise RecordNotFoundError(
+                    "Um dos exports selecionados não foi encontrado."
+                )
+            row = connection.execute(
+                """
+                SELECT id, left_campaign_id, right_campaign_id, evidence_json
+                FROM campaign_associations
+                WHERE (
+                    left_campaign_id = ? AND right_campaign_id = ?
+                ) OR (
+                    left_campaign_id = ? AND right_campaign_id = ?
+                )
+                """,
+                (
+                    campaign_id,
+                    related_campaign_id,
+                    related_campaign_id,
+                    campaign_id,
+                ),
+            ).fetchone()
+            if row is None:
+                raise RecordNotFoundError(
+                    "Estes exports não possuem sinais locais suficientes para "
+                    "uma confirmação assistida."
+                )
+            connection.execute(
+                """
+                UPDATE campaign_associations
+                SET association_state = ?
+                WHERE id = ?
+                """,
+                (state, row["id"]),
+            )
+
+        return {
+            "association_id": row["id"],
+            "association_state": state,
+            "campaign_id": campaign_id,
+            "related_campaign_id": related_campaign_id,
+            "evidence": json_loads(row["evidence_json"]),
+        }
 
     def campaign_history(self, campaign_id: str) -> list[dict[str, Any]]:
         self.initialize()
